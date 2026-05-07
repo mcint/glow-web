@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+{{template "style" .}}
+</head>
+<body>
+<header class="bar">
+  <div class="bar-title">
+    {{if .IndexURL}}<a class="bar-up" href="{{.IndexURL}}" title="index">↑</a>{{end}}
+    <h1 class="bar-name">{{.Name}}</h1>
+    <span class="bar-path">{{.Path}}</span>
+  </div>
+  <nav class="bar-actions">
+    <a href="{{.RawURL}}">Raw</a>
+    <a href="{{.DownloadURL}}">Download</a>
+    {{if .EditURL}}<a href="{{.EditURL}}">Edit</a>{{end}}
+  </nav>
+</header>
+<main>
+{{.Body}}
+</main>
+{{template "footer" .}}
+</body>
+</html>

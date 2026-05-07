@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+{{template "style" .}}
+</head>
+<body>
+<header class="bar">
+  <div class="bar-title">
+    <h1 class="bar-name">{{.Title}}</h1>
+    <span class="bar-path">{{.Path}}</span>
+  </div>
+  <nav class="bar-actions">
+    <span class="bar-path">{{.Count}} files</span>
+  </nav>
+</header>
+<main>
+<ul class="files">
+  {{range .Files}}
+  <li>
+    <a href="{{.URL}}">{{.Rel}}</a>
+    <span class="size">{{.Size}} B</span>
+  </li>
+  {{else}}
+  <li>(no markdown files found)</li>
+  {{end}}
+</ul>
+</main>
+{{template "footer" .}}
+</body>
+</html>
