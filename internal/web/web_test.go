@@ -146,6 +146,96 @@ func TestDirMode_PathTraversalRejected(t *testing.T) {
 	}
 }
 
+// --- edit + live preview + save ---
+
+func TestEdit_PageRenders(t *testing.T) {
+	dir, s := dirFixture(t)
+	_ = dir
+	rec := serve(s.Handler(), "GET", "/alpha.md?edit=1", "")
+	if rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`<title>alpha.md (edit)</title>`,
+		`<textarea id="src"`,
+		`# Alpha`, // source filled in
+		`const RENDER_URL = "/_/render"`,
+		`const SAVE_URL   = "/alpha.md"`,
+		`id="preview"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("edit page missing %q", want)
+		}
+	}
+}
+
+func TestEdit_DisabledWhenReadOnly(t *testing.T) {
+	_, s := dirFixture(t)
+	s.ReadOnly = true
+	rec := serve(s.Handler(), "GET", "/alpha.md?edit=1", "")
+	if rec.Code != 403 {
+		t.Errorf("readonly edit should 403, got %d", rec.Code)
+	}
+	// View page should also hide the Edit link
+	rec = serve(s.Handler(), "GET", "/alpha.md", "")
+	if strings.Contains(rec.Body.String(), `?edit=1`) {
+		t.Errorf("readonly mode should not render Edit link")
+	}
+}
+
+func TestRenderEndpoint_ConvertsBody(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "POST", "/_/render", "# Hello\n\n*bold*")
+	if rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `<h1 id="hello">Hello</h1>`) {
+		t.Errorf("render endpoint did not convert markdown: %q", body)
+	}
+}
+
+func TestSave_WritesFile(t *testing.T) {
+	dir, s := dirFixture(t)
+	rec := serve(s.Handler(), "POST", "/alpha.md", "# Updated\n")
+	if rec.Code != 204 {
+		t.Fatalf("save status = %d, want 204", rec.Code)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "alpha.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "# Updated\n" {
+		t.Errorf("file content = %q", string(got))
+	}
+}
+
+func TestSave_DisabledWhenReadOnly(t *testing.T) {
+	dir, s := dirFixture(t)
+	s.ReadOnly = true
+	rec := serve(s.Handler(), "POST", "/alpha.md", "# Hijack\n")
+	if rec.Code != 403 {
+		t.Errorf("readonly save should 403, got %d", rec.Code)
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, "alpha.md"))
+	if string(got) != "# Alpha\n" {
+		t.Errorf("file changed despite readonly: %q", string(got))
+	}
+}
+
+func TestSave_GitignoredReturns404(t *testing.T) {
+	dir, s := dirFixture(t)
+	rec := serve(s.Handler(), "POST", "/secret.md", "# Pwn\n")
+	if rec.Code != 404 {
+		t.Errorf("gitignored save should 404, got %d", rec.Code)
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, "secret.md"))
+	if string(got) != "shh" {
+		t.Errorf("gitignored file was overwritten: %q", string(got))
+	}
+}
+
 // --- url prefix ---
 
 func TestURLPrefix_RoutesUnderMount(t *testing.T) {

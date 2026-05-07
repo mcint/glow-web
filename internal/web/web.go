@@ -142,7 +142,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveOne handles a single markdown URL: the rendered HTML view, plus the
-// ?raw=1 / ?download=1 short-circuits.
+// ?raw=1 / ?download=1 / ?edit=1 short-circuits.
 func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayName, rel string) {
 	raw, err := os.ReadFile(abs)
 	if err != nil {
@@ -163,6 +163,14 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 		_, _ = w.Write(raw)
 		return
 	}
+	if q.Get("edit") == "1" {
+		if s.ReadOnly {
+			http.Error(w, "edit disabled (--readonly)", http.StatusForbidden)
+			return
+		}
+		s.serveEdit(w, raw, displayName, rel)
+		return
+	}
 
 	body, err := render.HTML(raw)
 	if err != nil {
@@ -171,14 +179,10 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 	}
 
 	selfURL := s.urlFor(rel)
-	displayPath := "/" + rel
-	if rel == "" {
-		displayPath = "/" + displayName
-	}
 	data := pageData{
 		Title:       displayName,
 		Name:        displayName,
-		Path:        displayPath,
+		Path:        displayPath(displayName, rel),
 		Body:        template.HTML(body),
 		ViewURL:     selfURL,
 		RawURL:      selfURL + "?raw=1",
@@ -195,6 +199,41 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 	if err := pageTmpl.ExecuteTemplate(w, "view.html.tmpl", data); err != nil {
 		fmt.Fprintf(os.Stderr, "glow-web: view template: %v\n", err)
 	}
+}
+
+func (s *Server) serveEdit(w http.ResponseWriter, src []byte, displayName, rel string) {
+	selfURL := s.urlFor(rel)
+	renderURL := "/_/render"
+	if s.URLPrefix != "" {
+		renderURL = s.URLPrefix + "/_/render"
+	}
+	data := pageData{
+		Title:     displayName + " (edit)",
+		Name:      displayName,
+		Path:      displayPath(displayName, rel),
+		Source:    string(src),
+		ViewURL:   selfURL,
+		SaveURL:   selfURL,
+		RenderURL: renderURL,
+		ShowSave:  true,
+		Version:   version.String(),
+	}
+	if s.Mode == ModeDir {
+		data.IndexURL = s.urlFor("")
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := pageTmpl.ExecuteTemplate(w, "edit.html.tmpl", data); err != nil {
+		fmt.Fprintf(os.Stderr, "glow-web: edit template: %v\n", err)
+	}
+}
+
+// displayPath returns the friendly "/foo.md" or "/sub/foo.md" string shown in
+// the bar and footer. For ModeFile (rel == "") we fall back to the basename.
+func displayPath(displayName, rel string) string {
+	if rel == "" {
+		return "/" + displayName
+	}
+	return "/" + rel
 }
 
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {

@@ -86,5 +86,23 @@ footer a { color: var(--muted); }
   .status.ok { color: #4ade80; }
   .status.err { color: #f87171; }
 }
+
+/* edit-page split-pane */
+main.split {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+  height: calc(100vh - 92px); max-width: none; padding: 0;
+}
+main.split textarea {
+  border: 0; border-right: 1px solid var(--border);
+  padding: 1rem; resize: none; outline: none;
+  font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg); color: var(--fg);
+}
+main.split .preview { padding: 1rem 1.5rem; overflow-y: auto; }
+main.split .preview > h1:first-child { margin-top: 0; }
+@media (max-width: 800px) {
+  main.split { grid-template-columns: 1fr; height: auto; }
+  main.split textarea { min-height: 40vh; border-right: 0; border-bottom: 1px solid var(--border); }
+}
 </style>
 {{end}}

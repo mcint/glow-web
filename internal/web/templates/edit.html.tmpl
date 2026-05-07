@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+{{template "style" .}}
+</head>
+<body>
+<header class="bar">
+  <div class="bar-title">
+    {{if .IndexURL}}<a class="bar-up" href="{{.IndexURL}}" title="index">↑</a>{{end}}
+    <h1 class="bar-name">{{.Name}}</h1>
+    <span class="bar-path">{{.Path}}</span>
+  </div>
+  <nav class="bar-actions">
+    <a href="{{.ViewURL}}">View</a>
+    <button id="save" type="button">Save</button>
+    <span class="status" id="status"></span>
+  </nav>
+</header>
+<main class="split">
+  <textarea id="src" spellcheck="false">{{.Source}}</textarea>
+  <article id="preview" class="preview"></article>
+</main>
+<script>
+const RENDER_URL = {{.RenderURL}};
+const SAVE_URL   = {{.SaveURL}};
+const src     = document.getElementById('src');
+const preview = document.getElementById('preview');
+const status  = document.getElementById('status');
+const saveBtn = document.getElementById('save');
+
+let renderTimer;
+async function rerender() {
+  try {
+    const r = await fetch(RENDER_URL, { method: 'POST', body: src.value });
+    if (r.ok) preview.innerHTML = await r.text();
+  } catch (_) { /* swallow during typing */ }
+}
+src.addEventListener('input', () => {
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(rerender, 250);
+});
+
+function setStatus(text, cls) {
+  status.textContent = text;
+  status.className = 'status' + (cls ? ' ' + cls : '');
+  if (cls) setTimeout(() => setStatus('', ''), 2500);
+}
+
+async function save() {
+  setStatus('saving…', '');
+  try {
+    const r = await fetch(SAVE_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/markdown; charset=utf-8'},
+      body: src.value,
+    });
+    if (r.ok) setStatus('saved', 'ok');
+    else      setStatus('save failed (' + r.status + ')', 'err');
+  } catch (_) {
+    setStatus('save failed', 'err');
+  }
+}
+saveBtn.addEventListener('click', save);
+window.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
+    e.preventDefault();
+    save();
+  }
+});
+
+rerender();
+</script>
+{{template "footer" .}}
+</body>
+</html>
