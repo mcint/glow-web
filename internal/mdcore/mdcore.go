@@ -40,4 +40,3 @@ func Parse(src []byte) ast.Node {
 func Walk(n ast.Node, fn func(n ast.Node, entering bool) (ast.WalkStatus, error)) error {
 	return ast.Walk(n, fn)
 }
-
