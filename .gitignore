@@ -1,0 +1,15 @@
+# Build artifacts
+/bin/
+/dist/
+/glow-web
+
+# Go
+*.test
+*.out
+coverage.txt
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
