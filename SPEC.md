@@ -20,11 +20,12 @@ just `## API` from a 2000-line spec) or grep-style workflows over docs trees.
 
 ## Non-goals (v0)
 
-- Editing. This is a reader / extractor, not an editor.
-- Live-reload / collaborative editing. Maybe later.
+- Authentication / multi-user. The web server trusts whoever can reach the
+  socket — pair with reverse-proxy auth for remote use.
+- Live collaborative editing (a la HedgeDoc). The single-user edit page with
+  live preview + save covers the immediate need; CRDT sync is later.
 - A custom markdown parser. We stand on [goldmark][gm] and Charmbracelet's
   [glamour][gl] for the styled TUI render.
-- Authentication / multi-user. The web server is single-user, localhost-first.
 
 ## Architecture
 
@@ -32,8 +33,10 @@ just `## API` from a 2000-line spec) or grep-style workflows over docs trees.
 cmd/glow-web/             entry point + subcommand dispatch
 internal/mdcore/          goldmark wiring, AST helpers, frontmatter
 internal/slice/           semantic ops on the AST (heading-path, code-blocks, …)
-internal/render/          output adapters: html, ansi (via glamour), json-ast
-internal/web/             net/http server, embedded assets/templates
+internal/render/          output adapters: html, hybrid markup, ansi (later)
+internal/walk/            gitignore-aware markdown discovery
+internal/web/             net/http server, embedded templates
+internal/version/         build identification (debug.ReadBuildInfo + vcs)
 internal/tui/             bubble tea program (placeholder in v0)
 testdata/                 fixtures shared across packages
 ```
@@ -43,13 +46,37 @@ The AST flows: `bytes → mdcore.Parse → ast.Node → {render,slice} → outpu
 ## Subcommand surface (v0)
 
 ```
-glow-web web [PATH] [--addr :8080] [--root .]    serve PATH or directory
-glow-web tui [PATH]                              styled TUI reader
+glow-web web PATH [flags]                        serve file OR directory
+    --addr :8080
+    --url-prefix /docs                           mount under prefix (reverse-proxy)
+    --gitignore=true                             honor .gitignore (dir mode)
+    --ignore-files .rgignore,.glowignore         additional ignore-files
+    --readonly                                   disable edit + save
+    --markup                                     default to hybrid markup view
+
+glow-web tui PATH                                styled TUI reader (stub in v0)
 glow-web slice PATH --heading "Foo / Bar"        extract a section by path
-glow-web slice PATH --code-lang go               extract code blocks by lang
-glow-web slice PATH --frontmatter                emit just the frontmatter
-glow-web render PATH --format html|ansi|json     one-shot render to stdout
+glow-web render PATH --format html|markup        one-shot render
+glow-web version                                 print build version
 ```
+
+### Web routes
+
+```
+GET  /                       index of discovered files (dir mode) or the file
+GET  /<rel>                  rendered HTML view
+GET  /<rel>?view=markup      hybrid view (markup chars muted, content styled)
+GET  /<rel>?view=rendered    explicit override of --markup default
+GET  /<rel>?raw=1            text/plain
+GET  /<rel>?download=1       text/markdown attachment
+GET  /<rel>?edit=1           edit page (split-pane, live preview)
+POST /<rel>                  save (text/markdown body)
+POST /_/render               live-preview helper: source body → HTML
+```
+
+When `--url-prefix /P` is set, all routes mount under `/P`. The walk-result
+list is the security boundary: requests for files not in the list 404, so
+gitignored secrets stay un-served.
 
 ## Semantic slicing — addressing model
 

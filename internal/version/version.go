@@ -12,16 +12,21 @@ import "runtime/debug"
 // the synthetic "(devel)" string that go injects for non-tagged builds.
 const Fallback = "v0.1.0-dev"
 
-// String returns the human-facing version, e.g. "v0.1.0-dev+8e9359c.dirty".
+// String returns the human-facing version, e.g. "v0.1.0-dev+8e9359c.dirty"
+// for development builds, or the module version verbatim for tagged builds
+// (which already encodes pseudo-version + dirty when relevant).
 func String() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return Fallback
 	}
 	v := info.Main.Version
-	if v == "" || v == "(devel)" {
-		v = Fallback
+	// Tagged or pseudo-versioned builds already carry full identifying info
+	// (including +dirty) — don't double-suffix.
+	if v != "" && v != "(devel)" {
+		return v
 	}
+	v = Fallback
 	var rev string
 	var dirty bool
 	for _, s := range info.Settings {
