@@ -36,11 +36,12 @@ const (
 
 // Server is an HTTP markdown viewer.
 type Server struct {
-	Mode      Mode
-	Root      string       // absolute path: a file (ModeFile) or dir (ModeDir)
-	Walk      walk.Options // populated when Mode == ModeDir
-	URLPrefix string       // mount point, e.g. "/docs"; empty means no prefix
-	ReadOnly  bool         // disables edit + save (also hides Edit link)
+	Mode          Mode
+	Root          string       // absolute path: a file (ModeFile) or dir (ModeDir)
+	Walk          walk.Options // populated when Mode == ModeDir
+	URLPrefix     string       // mount point, e.g. "/docs"; empty means no prefix
+	ReadOnly      bool         // disables edit + save (also hides Edit link)
+	DefaultMarkup bool         // when true, default view is hybrid markup; ?view=rendered overrides
 }
 
 // NewServer constructs a Server, autodetecting Mode from path's stat. walkOpts
@@ -172,10 +173,16 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 		return
 	}
 
-	body, err := render.HTML(raw)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	markup := s.viewIsMarkup(q.Get("view"))
+	var body []byte
+	if markup {
+		body = render.HTMLMarkup(raw)
+	} else {
+		body, err = render.HTML(raw)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	selfURL := s.urlFor(rel)
@@ -188,6 +195,14 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 		RawURL:      selfURL + "?raw=1",
 		DownloadURL: selfURL + "?download=1",
 		Version:     version.String(),
+		Markup:      markup,
+	}
+	if markup {
+		data.ToggleURL = selfURL + "?view=rendered"
+		data.ToggleLabel = "Rendered"
+	} else {
+		data.ToggleURL = selfURL + "?view=markup"
+		data.ToggleLabel = "Markup"
 	}
 	if !s.ReadOnly {
 		data.EditURL = selfURL + "?edit=1"
@@ -234,6 +249,19 @@ func displayPath(displayName, rel string) string {
 		return "/" + displayName
 	}
 	return "/" + rel
+}
+
+// viewIsMarkup decides which renderer to use for the main view. The query
+// parameter wins; otherwise we fall back to the server default.
+func (s *Server) viewIsMarkup(q string) bool {
+	switch q {
+	case "markup":
+		return true
+	case "rendered":
+		return false
+	default:
+		return s.DefaultMarkup
+	}
 }
 
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
@@ -357,7 +385,10 @@ type pageData struct {
 	EditURL     string
 	SaveURL     string
 	RenderURL   string
+	ToggleURL   string // url to flip between rendered and markup views
+	ToggleLabel string // label shown on the toggle button
 	ShowSave    bool
+	Markup      bool
 	Version     string
 }
 

@@ -146,6 +146,40 @@ func TestDirMode_PathTraversalRejected(t *testing.T) {
 	}
 }
 
+// --- markup view toggle ---
+
+func TestMarkupView_OptIn(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/alpha.md?view=markup", "")
+	if rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `class="md-markup"`) {
+		t.Errorf("markup view missing md-markup container")
+	}
+	if !strings.Contains(body, `<span class="md-marker">#`) {
+		t.Errorf("markup view missing heading marker span")
+	}
+	// Toggle should now point back to the rendered view
+	if !strings.Contains(body, `href="/alpha.md?view=rendered"`) {
+		t.Errorf("toggle should switch back to rendered: %s", body)
+	}
+}
+
+func TestMarkupView_DefaultMarkupServer(t *testing.T) {
+	_, s := dirFixture(t)
+	s.DefaultMarkup = true
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	body := rec.Body.String()
+	if !strings.Contains(body, `class="md-markup"`) {
+		t.Errorf("DefaultMarkup=true should pick markup view by default")
+	}
+	if !strings.Contains(body, `href="/alpha.md?view=rendered"`) {
+		t.Errorf("toggle should switch to rendered when default is markup")
+	}
+}
+
 // --- edit + live preview + save ---
 
 func TestEdit_PageRenders(t *testing.T) {

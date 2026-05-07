@@ -14,6 +14,7 @@
     <span class="bar-path">{{.Path}}</span>
   </div>
   <nav class="bar-actions">
+    {{if .ToggleURL}}<a href="{{.ToggleURL}}">{{.ToggleLabel}}</a>{{end}}
     <a href="{{.RawURL}}">Raw</a>
     <a href="{{.DownloadURL}}">Download</a>
     {{if .EditURL}}<a href="{{.EditURL}}">Edit</a>{{end}}
