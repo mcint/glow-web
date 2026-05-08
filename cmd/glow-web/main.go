@@ -60,7 +60,7 @@ func main() {
 
 func runWeb(args []string) {
 	fs := flag.NewFlagSet("web", flag.ExitOnError)
-	addr := fs.String("addr", ":8080", "address to listen on")
+	addr := fs.String("addr", "127.0.0.1:8080", `address to listen on (default loopback only; use ":8080" or "0.0.0.0:8080" to expose on LAN)`)
 	prefix := fs.String("url-prefix", "", `mount under URL prefix, e.g. "/docs"`)
 	gitignore := fs.Bool("gitignore", true, "honor .gitignore (dir mode); use --gitignore=false to disable")
 	ignoreFiles := fs.String("ignore-files", "", "comma-separated additional ignore-files (relative to PATH or absolute)")

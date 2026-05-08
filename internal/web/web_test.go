@@ -374,13 +374,19 @@ func TestDirMode_LinkResolutionPreservesAnchorAndQuery(t *testing.T) {
 }
 
 // --- listener URL formatting ---
+//
+// LAN IP placeholders use RFC 5737 TEST-NET ranges (192.0.2.0/24,
+// 198.51.100.0/24) which are reserved for documentation/examples and won't
+// be confused for any real network. Avoid RFC1918 (192.168.x, 10.x) here —
+// reading a real-looking IP in a public test is a small but pointless
+// "is this leaked from the author's network?" hesitation.
 
 func TestListenerLines_WildcardExpandsToLocalhostAndLAN(t *testing.T) {
-	got := web.FormatListenerLinesForTest(":8080", "", []string{"192.168.1.5", "10.0.0.7"})
+	got := web.FormatListenerLinesForTest(":8080", "", []string{"192.0.2.5", "198.51.100.7"})
 	want := []string{
 		"    http://localhost:8080/  (loopback)",
-		"    http://192.168.1.5:8080/  (lan)",
-		"    http://10.0.0.7:8080/  (lan)",
+		"    http://192.0.2.5:8080/  (lan)",
+		"    http://198.51.100.7:8080/  (lan)",
 	}
 	if !equalLines(got, want) {
 		t.Errorf("wildcard expansion:\ngot  %#v\nwant %#v", got, want)
@@ -405,7 +411,7 @@ func TestListenerLines_DualStackZeroAddrTreatedAsWildcard(t *testing.T) {
 }
 
 func TestListenerLines_SpecificHostShownVerbatim(t *testing.T) {
-	got := web.FormatListenerLinesForTest("127.0.0.1:8080", "", []string{"192.168.1.5"})
+	got := web.FormatListenerLinesForTest("127.0.0.1:8080", "", []string{"192.0.2.5"})
 	want := []string{"    http://127.0.0.1:8080/"}
 	if !equalLines(got, want) {
 		t.Errorf("specific host: %#v", got)

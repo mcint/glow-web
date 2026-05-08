@@ -47,7 +47,8 @@ The AST flows: `bytes → mdcore.Parse → ast.Node → {render,slice} → outpu
 
 ```
 glow-web web PATH [flags]                        serve file OR directory
-    --addr :8080
+    --addr 127.0.0.1:8080                        loopback by default; ":8080" or
+                                                 "0.0.0.0:8080" exposes on LAN
     --url-prefix /docs                           mount under prefix (reverse-proxy)
     --gitignore=true                             honor .gitignore (dir mode)
     --ignore-files .rgignore,.glowignore         additional ignore-files
