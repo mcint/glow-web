@@ -54,6 +54,7 @@ glow-web web PATH [flags]                        serve file OR directory
     --ignore-files .rgignore,.glowignore         additional ignore-files
     --readonly                                   disable edit + save
     --markup                                     default to hybrid markup view
+    --title-prefix glow-web                      <title> as "<prefix>: <doc>"; "" disables
 
 glow-web tui PATH                                styled TUI reader (stub in v0)
 glow-web slice PATH --heading "Foo / Bar"        extract a section by path

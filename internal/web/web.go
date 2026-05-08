@@ -47,6 +47,7 @@ type Server struct {
 	DefaultMarkup  bool         // when true, default view is hybrid markup; ?view=rendered overrides
 	CommandPalette bool         // when true, ⌘K / Ctrl-K opens a fuzzy file palette on every page
 	Theme          string       // "auto" (default), "light", or "dark"; user toggle in UI overrides
+	TitlePrefix    string       // prepended to <title>; empty disables. Default "glow-web".
 }
 
 // NewServer constructs a Server, autodetecting Mode from path's stat. walkOpts
@@ -386,6 +387,7 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 	data.FilesURL = s.utilityURL("/_/files")
 	data.ServerTheme = s.serverTheme()
 	data.KeyPrefix = s.keyPrefix()
+	data.TitlePrefix = s.TitlePrefix
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := pageTmpl.ExecuteTemplate(w, "view.html.tmpl", data); err != nil {
 		fmt.Fprintf(os.Stderr, "glow-web: view template: %v\n", err)
@@ -408,6 +410,7 @@ func (s *Server) serveEdit(w http.ResponseWriter, src []byte, displayName, rel s
 		Palette:     s.CommandPalette,
 		ServerTheme: s.serverTheme(),
 		KeyPrefix:   s.keyPrefix(),
+		TitlePrefix: s.TitlePrefix,
 		Version:     version.String(),
 	}
 	if s.Mode == ModeDir {
@@ -606,6 +609,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		Palette:     s.CommandPalette,
 		ServerTheme: s.serverTheme(),
 		KeyPrefix:   s.keyPrefix(),
+		TitlePrefix: s.TitlePrefix,
 		Version:     version.String(),
 	}
 	if err := pageTmpl.ExecuteTemplate(w, "index.html.tmpl", data); err != nil {
@@ -765,6 +769,7 @@ type pageData struct {
 	Palette     bool   // include command palette overlay + script
 	ServerTheme string // "auto" | "light" | "dark"; baked into theme-init script
 	KeyPrefix   string // localStorage namespace, scoped per project root
+	TitlePrefix string // prepended to <title>; empty disables
 	Version     string
 }
 
@@ -787,6 +792,7 @@ type indexData struct {
 	Palette     bool   // include command palette overlay + script
 	ServerTheme string // "auto" | "light" | "dark"; baked into theme-init script
 	KeyPrefix   string // localStorage namespace, scoped per project root
+	TitlePrefix string // prepended to <title>; empty disables
 	Version     string
 }
 

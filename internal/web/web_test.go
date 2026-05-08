@@ -24,7 +24,7 @@ func TestFileHandler_RendersFixture(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		"<!doctype html>",
-		`<title>sample.md</title>`,
+		`<title>sample.md</title>`, // FileHandler shim leaves TitlePrefix empty
 		`<span class="crumb crumb-current">sample.md</span>`,
 		`<h1 id="sample">Sample</h1>`,
 		`<code class="language-go">`,
@@ -80,6 +80,8 @@ func dirFixture(t *testing.T) (string, *web.Server) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Match the CLI default so production tests describe what users see.
+	s.TitlePrefix = "glow-web"
 	return dir, s
 }
 
@@ -184,6 +186,45 @@ func TestDirMode_PathTraversalRejected(t *testing.T) {
 		if rec.Code >= 200 && rec.Code < 300 {
 			t.Errorf("path %q served %d, body: %s", p, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+// --- title prefix ---
+
+func TestTitlePrefix_DefaultPrependsGlowWeb(t *testing.T) {
+	_, s := dirFixture(t) // dirFixture sets TitlePrefix = "glow-web"
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	if !strings.Contains(rec.Body.String(), `<title>glow-web: alpha.md</title>`) {
+		t.Errorf("default prefix not applied: %s", rec.Body.String())
+	}
+}
+
+func TestTitlePrefix_IndexAlsoPrefixed(t *testing.T) {
+	dir, s := dirFixture(t)
+	_ = dir
+	rec := serve(s.Handler(), "GET", "/", "")
+	body := rec.Body.String()
+	// Index Title is the project basename (the temp dir's basename).
+	if !strings.Contains(body, `<title>glow-web: `) {
+		t.Errorf("index title missing prefix: %s", body)
+	}
+}
+
+func TestTitlePrefix_EmptyDisables(t *testing.T) {
+	_, s := dirFixture(t)
+	s.TitlePrefix = ""
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	if !strings.Contains(rec.Body.String(), `<title>alpha.md</title>`) {
+		t.Errorf("empty TitlePrefix should give bare doc title: %s", rec.Body.String())
+	}
+}
+
+func TestTitlePrefix_CustomWithPort(t *testing.T) {
+	_, s := dirFixture(t)
+	s.TitlePrefix = "glow-web:8080"
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	if !strings.Contains(rec.Body.String(), `<title>glow-web:8080: alpha.md</title>`) {
+		t.Errorf("custom prefix with port not applied: %s", rec.Body.String())
 	}
 }
 
@@ -598,7 +639,7 @@ func TestEdit_PageRenders(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		`<title>alpha.md (edit)</title>`,
+		`<title>glow-web: alpha.md (edit)</title>`,
 		`<textarea id="src"`,
 		`# Alpha`, // source filled in
 		`const RENDER_URL = "/_/render"`,

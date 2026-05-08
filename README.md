@@ -82,6 +82,8 @@ glow-web version
 --markup                   default to hybrid markup view
 --palette=true             ⌘K / Ctrl-K command palette (default on)
 --theme auto               auto | light | dark (browser toggle overrides)
+--title-prefix glow-web    prepended to <title> as "<prefix>: <doc>"; "" disables.
+                           Add port to distinguish instances: --title-prefix "glow-web:8080"
 ```
 
 ## Status
