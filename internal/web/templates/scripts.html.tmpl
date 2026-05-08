@@ -1,5 +1,13 @@
 {{define "scripts"}}
 <script>
+// All localStorage keys are namespaced via KEY_PREFIX (per-project hash) so
+// two glow-web instances on the same browser origin can't trample each
+// other's UI state. KEY_PREFIX is shared across the theme toggle, the
+// sidebar open/close state, and the per-file scroll memory below.
+const KEY_PREFIX = {{.KeyPrefix}};
+function K(suffix) { return KEY_PREFIX + suffix; }
+</script>
+<script>
 // theme toggle: cycles auto → light → dark → auto, persists in localStorage,
 // and re-applies on system preference changes when in 'auto' mode. The
 // theme-init partial in <head> handles the initial paint; this just wires
@@ -10,13 +18,13 @@
   var ICONS  = {auto: '◐', light: '☀', dark: '☾'};
   var ORDER  = ['auto', 'light', 'dark'];
   function getChoice() {
-    try { return localStorage.getItem('glow-theme') || 'auto'; }
+    try { return localStorage.getItem(K('theme')) || 'auto'; }
     catch (e) { return 'auto'; }
   }
   function setChoice(c) {
     try {
-      if (c === 'auto') localStorage.removeItem('glow-theme');
-      else              localStorage.setItem('glow-theme', c);
+      if (c === 'auto') localStorage.removeItem(K('theme'));
+      else              localStorage.setItem(K('theme'), c);
     } catch (e) {}
     apply();
     paint();
@@ -138,7 +146,7 @@
   let files = null;
   let current = [];
   let selected = 0;
-  const STATE_KEY = 'glow-palette-open';
+  const STATE_KEY = K('palette-open');
 
   function loadFiles(then) {
     fetch(filesURL).then(r => r.ok ? r.json() : []).then(data => {
@@ -228,7 +236,7 @@
 // where you left off). On load, jumps back unless the URL has a #anchor
 // (anchor scroll wins). localStorage only — no cookies.
 (function() {
-  const key = 'glow-scroll:' + location.pathname;
+  const key = K('scroll:' + location.pathname);
   const SAVE_DEBOUNCE_MS = 250;
   let saveTimer;
   function maxScroll() {

@@ -8,6 +8,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"html/template"
 	"io"
 	"net"
@@ -384,6 +385,7 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 	data.Palette = s.CommandPalette
 	data.FilesURL = s.utilityURL("/_/files")
 	data.ServerTheme = s.serverTheme()
+	data.KeyPrefix = s.keyPrefix()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := pageTmpl.ExecuteTemplate(w, "view.html.tmpl", data); err != nil {
 		fmt.Fprintf(os.Stderr, "glow-web: view template: %v\n", err)
@@ -405,6 +407,7 @@ func (s *Server) serveEdit(w http.ResponseWriter, src []byte, displayName, rel s
 		ShowSave:    true,
 		Palette:     s.CommandPalette,
 		ServerTheme: s.serverTheme(),
+		KeyPrefix:   s.keyPrefix(),
 		Version:     version.String(),
 	}
 	if s.Mode == ModeDir {
@@ -435,6 +438,21 @@ func (s *Server) serverTheme() string {
 	default:
 		return "auto"
 	}
+}
+
+// keyPrefix is the localStorage namespace for this server's UI state. Two
+// glow-web instances running on the same browser origin (same host:port)
+// would otherwise collide on `glow-theme`, `glow-palette-open`,
+// `glow-scroll:<path>`, etc. Hashing the absolute root gives a stable per-
+// project namespace without leaking the path itself into the page source.
+//
+// FNV-1a (32-bit, 8 hex chars) is plenty: collision likelihood across the
+// handful of projects on one machine is negligible, and the hash isn't a
+// security boundary — just a cache key.
+func (s *Server) keyPrefix() string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s.Root))
+	return fmt.Sprintf("glow-%08x-", h.Sum32())
 }
 
 // displayPath returns the friendly "/foo.md" or "/sub/foo.md" string shown in
@@ -587,6 +605,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		FilesURL:    s.utilityURL("/_/files"),
 		Palette:     s.CommandPalette,
 		ServerTheme: s.serverTheme(),
+		KeyPrefix:   s.keyPrefix(),
 		Version:     version.String(),
 	}
 	if err := pageTmpl.ExecuteTemplate(w, "index.html.tmpl", data); err != nil {
@@ -745,6 +764,7 @@ type pageData struct {
 	Markup      bool
 	Palette     bool   // include command palette overlay + script
 	ServerTheme string // "auto" | "light" | "dark"; baked into theme-init script
+	KeyPrefix   string // localStorage namespace, scoped per project root
 	Version     string
 }
 
@@ -766,6 +786,7 @@ type indexData struct {
 	FilesURL    string // /_/files endpoint, used by command palette
 	Palette     bool   // include command palette overlay + script
 	ServerTheme string // "auto" | "light" | "dark"; baked into theme-init script
+	KeyPrefix   string // localStorage namespace, scoped per project root
 	Version     string
 }
 

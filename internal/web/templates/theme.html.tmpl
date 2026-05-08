@@ -2,12 +2,15 @@
 <script>
 // Resolve the effective theme before paint to avoid a flash of light content
 // on dark-preferring systems. Order of precedence:
-//   1. localStorage 'glow-theme' = 'light' | 'dark' | 'auto'  (user toggle)
-//   2. server-rendered initial = {{.ServerTheme}}             (--theme flag)
+//   1. localStorage '<KeyPrefix>theme' = 'light' | 'dark' | 'auto'  (user toggle)
+//   2. server-rendered initial = {{.ServerTheme}}                   (--theme flag)
 //   3. window.matchMedia(prefers-color-scheme)
+// KeyPrefix is per-project (hashed root) so two glow-web instances on the
+// same browser origin don't trample each other's UI state.
 (function() {
+  var KEY = {{.KeyPrefix}} + 'theme';
   var stored = null;
-  try { stored = localStorage.getItem('glow-theme'); } catch (e) {}
+  try { stored = localStorage.getItem(KEY); } catch (e) {}
   var server = {{.ServerTheme}};
   var systemDark = window.matchMedia &&
                    window.matchMedia('(prefers-color-scheme: dark)').matches;

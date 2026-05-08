@@ -82,13 +82,16 @@ gitignored secrets stay un-served.
 ### Browser-local UI state
 
 Three pieces of UI state persist in `localStorage` (no cookies, never sent
-to the server):
+to the server). All keys are namespaced by a per-project prefix
+`glow-<XXXXXXXX>-` where `XXXXXXXX` is an FNV-1a hash of the absolute
+root, so two glow-web instances on the same browser origin (same
+`host:port`) don't trample each other's state.
 
-| Key                       | Purpose                                              |
-| ------------------------- | ---------------------------------------------------- |
-| `glow-theme`              | `light` / `dark` / `auto` — overrides `--theme` flag |
-| `glow-palette-open`       | `1` / `0` — sidebar open state restored on each page |
-| `glow-scroll:<pathname>`  | scroll position as fraction `0..1` per file          |
+| Key suffix               | Purpose                                              |
+| ------------------------ | ---------------------------------------------------- |
+| `theme`                  | `light` / `dark` / `auto` — overrides `--theme` flag |
+| `palette-open`           | `1` / `0` — sidebar open state restored on each page |
+| `scroll:<pathname>`      | scroll position as fraction `0..1` per file          |
 
 The sidebar is left-anchored, slides in over the page, and shifts main
 content right via a body class. It opens on ⌘K / Ctrl-K, closes on Esc
@@ -96,6 +99,10 @@ or another ⌘K, and stays pinned across page navigations so jump-back-
 and-forth between files doesn't require re-summoning it. Scroll memory
 restores on load except when the URL carries a `#anchor` (anchor scroll
 wins).
+
+Aging-out of stale keys is left to the browser — entries are small (a
+few bytes each) and accumulate slowly; modern browsers evict origin
+storage under pressure.
 
 ## Intra-project link rewriting
 

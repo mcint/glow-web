@@ -271,7 +271,7 @@ func TestPalette_RenderedWhenEnabled(t *testing.T) {
 		`id="palette"`,
 		`id="palette-input"`,
 		`const filesURL = "/_/files"`,
-		`STATE_KEY = 'glow-palette-open'`, // sidebar persistence
+		`STATE_KEY = K('palette-open')`, // namespaced sidebar persistence
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("palette missing %q", want)
@@ -283,9 +283,55 @@ func TestScrollMemory_ShipsOnViewPages(t *testing.T) {
 	_, s := dirFixture(t)
 	rec := serve(s.Handler(), "GET", "/alpha.md", "")
 	body := rec.Body.String()
-	if !strings.Contains(body, `'glow-scroll:'`) {
-		t.Errorf("scroll-memory script missing on view page")
+	if !strings.Contains(body, `K('scroll:'`) {
+		t.Errorf("namespaced scroll-memory script missing on view page")
 	}
+}
+
+func TestKeyPrefix_PerProjectScoped(t *testing.T) {
+	dir1 := t.TempDir()
+	mustWrite(t, filepath.Join(dir1, "a.md"), "# A")
+	s1, err := web.NewServer(dir1, walk.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir2 := t.TempDir()
+	mustWrite(t, filepath.Join(dir2, "a.md"), "# A")
+	s2, err := web.NewServer(dir2, walk.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body1 := serve(s1.Handler(), "GET", "/a.md", "").Body.String()
+	body2 := serve(s2.Handler(), "GET", "/a.md", "").Body.String()
+
+	prefix1 := extractKeyPrefix(t, body1)
+	prefix2 := extractKeyPrefix(t, body2)
+
+	if prefix1 == prefix2 {
+		t.Errorf("two distinct project roots should yield different KEY_PREFIX, got %q == %q", prefix1, prefix2)
+	}
+	for _, p := range []string{prefix1, prefix2} {
+		if !strings.HasPrefix(p, "glow-") || !strings.HasSuffix(p, "-") || len(p) != len("glow-XXXXXXXX-") {
+			t.Errorf("KEY_PREFIX shape unexpected: %q", p)
+		}
+	}
+}
+
+// extractKeyPrefix pulls the JS-string literal out of `const KEY_PREFIX = "..."`.
+func extractKeyPrefix(t *testing.T, body string) string {
+	t.Helper()
+	const marker = `const KEY_PREFIX = "`
+	i := strings.Index(body, marker)
+	if i < 0 {
+		t.Fatalf("KEY_PREFIX not found in body")
+	}
+	rest := body[i+len(marker):]
+	j := strings.IndexByte(rest, '"')
+	if j < 0 {
+		t.Fatalf("KEY_PREFIX value not terminated")
+	}
+	return rest[:j]
 }
 
 func TestPalette_HiddenWhenDisabled(t *testing.T) {
