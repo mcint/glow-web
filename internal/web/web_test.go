@@ -187,6 +187,79 @@ func TestDirMode_PathTraversalRejected(t *testing.T) {
 	}
 }
 
+// --- command palette + /_/files + index filter ---
+
+func TestFilesEndpoint_DirMode(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/_/files", "")
+	if rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("content-type = %q", ct)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"rel":"alpha.md"`, `"url":"/alpha.md"`, `"rel":"sub/beta.md"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/_/files missing %q in: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "secret.md") {
+		t.Errorf("/_/files leaked gitignored entry: %s", body)
+	}
+}
+
+func TestPalette_RenderedWhenEnabled(t *testing.T) {
+	_, s := dirFixture(t)
+	s.CommandPalette = true
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	body := rec.Body.String()
+	for _, want := range []string{
+		`id="palette"`,
+		`id="palette-input"`,
+		`const filesURL = "/_/files"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("palette missing %q", want)
+		}
+	}
+}
+
+func TestPalette_HiddenWhenDisabled(t *testing.T) {
+	_, s := dirFixture(t)
+	s.CommandPalette = false
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	body := rec.Body.String()
+	if strings.Contains(body, `id="palette"`) {
+		t.Errorf("palette overlay should not render when disabled")
+	}
+	// The shared script block still ships (for the index filter), but the
+	// palette-specific UI must not.
+	if strings.Contains(body, `id="palette-input"`) {
+		t.Errorf("palette input should not render when disabled")
+	}
+}
+
+func TestIndexFilterInput_Present(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/", "")
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="index-filter"`) {
+		t.Errorf("index page missing filter input")
+	}
+}
+
+func TestPalette_FilesURLPrefixed(t *testing.T) {
+	_, s := dirFixture(t)
+	s.URLPrefix = "/docs"
+	s.CommandPalette = true
+	rec := serve(s.Handler(), "GET", "/docs/alpha.md", "")
+	body := rec.Body.String()
+	if !strings.Contains(body, `const filesURL = "/docs/_/files"`) {
+		t.Errorf("palette filesURL should carry URL prefix: %s", body)
+	}
+}
+
 // --- intra-project link rewriting ---
 
 func TestDirMode_RewritesIntraProjectLinks(t *testing.T) {

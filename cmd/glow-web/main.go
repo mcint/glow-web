@@ -66,6 +66,7 @@ func runWeb(args []string) {
 	ignoreFiles := fs.String("ignore-files", "", "comma-separated additional ignore-files (relative to PATH or absolute)")
 	readonly := fs.Bool("readonly", false, "disable the edit page and save endpoint")
 	markupDefault := fs.Bool("markup", false, "default to hybrid markup view (toggle with ?view=rendered)")
+	palette := fs.Bool("palette", true, "enable ⌘K / Ctrl-K command palette (use --palette=false to disable)")
 	parseIntermixed(fs, args)
 	if fs.NArg() < 1 {
 		fmt.Fprintln(os.Stderr, "glow-web web: missing PATH (file or directory)")
@@ -90,6 +91,7 @@ func runWeb(args []string) {
 	s.URLPrefix = normalizePrefix(*prefix)
 	s.ReadOnly = *readonly
 	s.DefaultMarkup = *markupDefault
+	s.CommandPalette = *palette
 	if err := s.Serve(*addr); err != nil {
 		die(err)
 	}

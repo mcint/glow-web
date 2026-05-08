@@ -6,6 +6,7 @@ package web
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -37,12 +38,13 @@ const (
 
 // Server is an HTTP markdown viewer.
 type Server struct {
-	Mode          Mode
-	Root          string       // absolute path: a file (ModeFile) or dir (ModeDir)
-	Walk          walk.Options // populated when Mode == ModeDir
-	URLPrefix     string       // mount point, e.g. "/docs"; empty means no prefix
-	ReadOnly      bool         // disables edit + save (also hides Edit link)
-	DefaultMarkup bool         // when true, default view is hybrid markup; ?view=rendered overrides
+	Mode           Mode
+	Root           string       // absolute path: a file (ModeFile) or dir (ModeDir)
+	Walk           walk.Options // populated when Mode == ModeDir
+	URLPrefix      string       // mount point, e.g. "/docs"; empty means no prefix
+	ReadOnly       bool         // disables edit + save (also hides Edit link)
+	DefaultMarkup  bool         // when true, default view is hybrid markup; ?view=rendered overrides
+	CommandPalette bool         // when true, ⌘K / Ctrl-K opens a fuzzy file palette on every page
 }
 
 // NewServer constructs a Server, autodetecting Mode from path's stat. walkOpts
@@ -71,6 +73,7 @@ func NewServer(p string, walkOpts walk.Options) (*Server, error) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/_/render", s.handleRender)
+	mux.HandleFunc("/_/files", s.handleFiles)
 	mux.HandleFunc("/", s.handleRoot)
 	if s.URLPrefix == "" {
 		return mux
@@ -377,6 +380,8 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 	if s.Mode == ModeDir {
 		data.IndexURL = s.urlFor("")
 	}
+	data.Palette = s.CommandPalette
+	data.FilesURL = s.utilityURL("/_/files")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := pageTmpl.ExecuteTemplate(w, "view.html.tmpl", data); err != nil {
 		fmt.Fprintf(os.Stderr, "glow-web: view template: %v\n", err)
@@ -385,10 +390,6 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 
 func (s *Server) serveEdit(w http.ResponseWriter, src []byte, displayName, rel string) {
 	selfURL := s.urlFor(rel)
-	renderURL := "/_/render"
-	if s.URLPrefix != "" {
-		renderURL = s.URLPrefix + "/_/render"
-	}
 	data := pageData{
 		Title:     displayName + " (edit)",
 		Name:      displayName,
@@ -397,8 +398,10 @@ func (s *Server) serveEdit(w http.ResponseWriter, src []byte, displayName, rel s
 		Source:    string(src),
 		ViewURL:   selfURL,
 		SaveURL:   selfURL,
-		RenderURL: renderURL,
+		RenderURL: s.utilityURL("/_/render"),
+		FilesURL:  s.utilityURL("/_/files"),
 		ShowSave:  true,
+		Palette:   s.CommandPalette,
 		Version:   version.String(),
 	}
 	if s.Mode == ModeDir {
@@ -408,6 +411,15 @@ func (s *Server) serveEdit(w http.ResponseWriter, src []byte, displayName, rel s
 	if err := pageTmpl.ExecuteTemplate(w, "edit.html.tmpl", data); err != nil {
 		fmt.Fprintf(os.Stderr, "glow-web: edit template: %v\n", err)
 	}
+}
+
+// utilityURL builds an externally-visible URL for an in-server endpoint
+// (e.g. /_/render, /_/files), accounting for the URL prefix mount.
+func (s *Server) utilityURL(p string) string {
+	if s.URLPrefix == "" {
+		return p
+	}
+	return s.URLPrefix + p
 }
 
 // displayPath returns the friendly "/foo.md" or "/sub/foo.md" string shown in
@@ -551,13 +563,15 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data := indexData{
-		Title:   filepath.Base(s.Root),
-		Path:    displayRoot(s.Root),
-		Crumbs:  s.crumbsForIndex(prefixFilter),
-		Filter:  prefixFilter,
-		Files:   items,
-		Count:   len(items),
-		Version: version.String(),
+		Title:    filepath.Base(s.Root),
+		Path:     displayRoot(s.Root),
+		Crumbs:   s.crumbsForIndex(prefixFilter),
+		Filter:   prefixFilter,
+		Files:    items,
+		Count:    len(items),
+		FilesURL: s.utilityURL("/_/files"),
+		Palette:  s.CommandPalette,
+		Version:  version.String(),
 	}
 	if err := pageTmpl.ExecuteTemplate(w, "index.html.tmpl", data); err != nil {
 		fmt.Fprintf(os.Stderr, "glow-web: index template: %v\n", err)
@@ -581,6 +595,37 @@ func normalizePrefixFilter(s string) string {
 		cleaned += "/"
 	}
 	return cleaned
+}
+
+// handleFiles emits the project's discovered file list as JSON, used as the
+// data source for the command palette. Walk-result-based, so gitignored
+// files don't leak (matches the index and link-rewriting allowlist).
+func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	type entry struct {
+		Rel string `json:"rel"`
+		URL string `json:"url"`
+	}
+	var out []entry
+	if s.Mode == ModeDir {
+		files, err := walk.Files(s.Walk)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		out = make([]entry, len(files))
+		for i, f := range files {
+			out[i] = entry{Rel: f.Rel, URL: s.urlFor(f.Rel)}
+		}
+	} else {
+		// Single-file mode: one entry, the file itself.
+		out = []entry{{Rel: filepath.Base(s.Root), URL: s.urlFor("")}}
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 // handleRender powers the live-preview pane: POST a markdown body, get the
@@ -677,10 +722,12 @@ type pageData struct {
 	EditURL     string
 	SaveURL     string
 	RenderURL   string
+	FilesURL    string // /_/files endpoint, used by command palette
 	ToggleURL   string // url to flip between rendered and markup views
 	ToggleLabel string // label shown on the toggle button
 	ShowSave    bool
 	Markup      bool
+	Palette     bool // include command palette overlay + script
 	Version     string
 }
 
@@ -693,13 +740,15 @@ type indexItem struct {
 }
 
 type indexData struct {
-	Title   string
-	Path    string  // home-relative project root, shown in footer
-	Crumbs  []crumb // breadcrumb nav for current prefix filter
-	Filter  string  // current prefix filter (e.g. "sub/"); empty means root
-	Files   []indexItem
-	Count   int
-	Version string
+	Title    string
+	Path     string  // home-relative project root, shown in footer
+	Crumbs   []crumb // breadcrumb nav for current prefix filter
+	Filter   string  // current prefix filter (e.g. "sub/"); empty means root
+	Files    []indexItem
+	Count    int
+	FilesURL string // /_/files endpoint, used by command palette
+	Palette  bool   // include command palette overlay + script
+	Version  string
 }
 
 // Backwards-compat shims for the existing CLI and tests.

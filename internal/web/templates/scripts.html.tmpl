@@ -1,0 +1,157 @@
+{{define "scripts"}}
+{{if .Palette}}
+<div id="palette" class="palette" hidden role="dialog" aria-label="navigate">
+  <div class="palette-box">
+    <input id="palette-input" type="text" placeholder="jump to file…  (esc to close)"
+           autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <ul id="palette-results" role="listbox"></ul>
+  </div>
+</div>
+{{end}}
+<script>
+(function() {
+  // ---- shared fuzzy match ----
+  // Subsequence match with fzf-style scoring: rewards contiguous runs and
+  // word-boundary hits, penalises later positions. Lower score = better.
+  function fuzzyMatch(query, target) {
+    if (!query) return { match: true, indices: [], score: 0 };
+    const q = query.toLowerCase(), t = target.toLowerCase();
+    const indices = [];
+    let i = 0, score = 0, last = -2;
+    for (let j = 0; j < t.length && i < q.length; j++) {
+      if (t[j] === q[i]) {
+        indices.push(j);
+        if (j === last + 1) score -= 4;                          // contiguous bonus
+        if (j === 0 || /[\W_/]/.test(t[j-1])) score -= 6;        // word-boundary bonus
+        score += j * 0.5;                                        // earlier-is-better
+        last = j;
+        i++;
+      }
+    }
+    return { match: i === q.length, indices, score };
+  }
+  function escapeHTML(s) {
+    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+  }
+  function highlight(text, indices) {
+    if (!indices || !indices.length) return escapeHTML(text);
+    let out = '', last = 0;
+    for (const idx of indices) {
+      out += escapeHTML(text.slice(last, idx)) + '<mark>' + escapeHTML(text[idx]) + '</mark>';
+      last = idx + 1;
+    }
+    return out + escapeHTML(text.slice(last));
+  }
+
+  // ---- index page inline filter (data already in DOM) ----
+  const indexFilter = document.getElementById('index-filter');
+  const indexList = document.querySelector('ul.files');
+  if (indexFilter && indexList) {
+    const items = Array.from(indexList.querySelectorAll('li[data-rel]'));
+    const counter = document.getElementById('count');
+    const rerender = () => {
+      const q = indexFilter.value;
+      let visible = 0;
+      const scored = items.map(li => ({ li, ...fuzzyMatch(q, li.dataset.rel) }));
+      scored.sort((a, b) => (a.match === b.match) ? a.score - b.score : (a.match ? -1 : 1));
+      indexList.innerHTML = '';
+      for (const s of scored) {
+        if (!s.match) { s.li.style.display = 'none'; continue; }
+        s.li.style.display = '';
+        const link = s.li.querySelector('a');
+        if (link) link.innerHTML = highlight(s.li.dataset.rel, s.indices);
+        indexList.appendChild(s.li);
+        visible++;
+      }
+      if (counter) counter.textContent = visible + ' files';
+    };
+    indexFilter.addEventListener('input', rerender);
+    indexFilter.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        const first = indexList.querySelector('li[data-rel] a');
+        if (first) { e.preventDefault(); location.href = first.href; }
+      } else if (e.key === 'Escape') {
+        indexFilter.value = '';
+        rerender();
+      }
+    });
+  }
+
+  // ---- command palette (Cmd-K / Ctrl-K) ----
+  const palette = document.getElementById('palette');
+  if (!palette) return;
+  const input = document.getElementById('palette-input');
+  const results = document.getElementById('palette-results');
+  const filesURL = {{.FilesURL}};
+  let files = null;
+  let current = [];
+  let selected = 0;
+
+  function open() {
+    palette.hidden = false;
+    input.value = '';
+    selected = 0;
+    if (files === null) {
+      fetch(filesURL).then(r => r.ok ? r.json() : []).then(data => {
+        files = data;
+        render();
+      }).catch(() => { files = []; render(); });
+    } else {
+      render();
+    }
+    setTimeout(() => input.focus(), 0);
+  }
+  function close() { palette.hidden = true; input.blur(); }
+  function move(dir) {
+    if (!current.length) return;
+    selected = (selected + dir + current.length) % current.length;
+    paint();
+  }
+  function go() {
+    const item = current[selected];
+    if (item) location.href = item.url;
+  }
+  function render() {
+    if (!files) { results.innerHTML = ''; return; }
+    const q = input.value;
+    const scored = files.map(f => ({ ...f, ...fuzzyMatch(q, f.rel) }))
+                       .filter(s => s.match)
+                       .sort((a, b) => a.score - b.score);
+    current = scored.slice(0, 50);
+    if (selected >= current.length) selected = 0;
+    paint();
+  }
+  function paint() {
+    results.innerHTML = current.map((s, i) => {
+      const cls = i === selected ? 'palette-item palette-selected' : 'palette-item';
+      return `<li class="${cls}" data-i="${i}">${highlight(s.rel, s.indices)}</li>`;
+    }).join('');
+    Array.from(results.children).forEach(li => {
+      li.addEventListener('click', () => {
+        selected = parseInt(li.dataset.i, 10);
+        go();
+      });
+    });
+    const sel = results.querySelector('.palette-selected');
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+  }
+
+  window.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      palette.hidden ? open() : close();
+    } else if (e.key === 'Escape' && !palette.hidden) {
+      e.preventDefault();
+      close();
+    }
+  });
+  palette.addEventListener('click', e => { if (e.target === palette) close(); });
+  input.addEventListener('input', render);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+    else if (e.key === 'Enter')  { e.preventDefault(); go(); }
+  });
+})();
+</script>
+{{end}}

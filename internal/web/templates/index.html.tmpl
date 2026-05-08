@@ -10,6 +10,8 @@
 <header class="bar">
   {{template "crumbs" .}}
   <nav class="bar-actions">
+    <input type="text" id="index-filter" placeholder="filter…" autocomplete="off"
+           autocapitalize="off" spellcheck="false">
     <span class="bar-path" id="count">{{.Count}} files</span>
   </nav>
 </header>
@@ -26,5 +28,6 @@
 </ul>
 </main>
 {{template "footer" .}}
+{{template "scripts" .}}
 </body>
 </html>
