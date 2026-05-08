@@ -146,6 +146,71 @@ func TestDirMode_PathTraversalRejected(t *testing.T) {
 	}
 }
 
+// --- listener URL formatting ---
+
+func TestListenerLines_WildcardExpandsToLocalhostAndLAN(t *testing.T) {
+	got := web.FormatListenerLinesForTest(":8080", "", []string{"192.168.1.5", "10.0.0.7"})
+	want := []string{
+		"    http://localhost:8080/  (loopback)",
+		"    http://192.168.1.5:8080/  (lan)",
+		"    http://10.0.0.7:8080/  (lan)",
+	}
+	if !equalLines(got, want) {
+		t.Errorf("wildcard expansion:\ngot  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestListenerLines_ZeroAddrTreatedAsWildcard(t *testing.T) {
+	got := web.FormatListenerLinesForTest("0.0.0.0:8080", "", nil)
+	want := []string{"    http://localhost:8080/  (loopback)"}
+	if !equalLines(got, want) {
+		t.Errorf("0.0.0.0 expansion: %#v", got)
+	}
+}
+
+func TestListenerLines_DualStackZeroAddrTreatedAsWildcard(t *testing.T) {
+	// What net.Listen(":8080") returns on dual-stack systems is "[::]:8080".
+	got := web.FormatListenerLinesForTest("[::]:8080", "", nil)
+	want := []string{"    http://localhost:8080/  (loopback)"}
+	if !equalLines(got, want) {
+		t.Errorf("[::] expansion: %#v", got)
+	}
+}
+
+func TestListenerLines_SpecificHostShownVerbatim(t *testing.T) {
+	got := web.FormatListenerLinesForTest("127.0.0.1:8080", "", []string{"192.168.1.5"})
+	want := []string{"    http://127.0.0.1:8080/"}
+	if !equalLines(got, want) {
+		t.Errorf("specific host: %#v", got)
+	}
+}
+
+func TestListenerLines_PrefixIncluded(t *testing.T) {
+	got := web.FormatListenerLinesForTest("127.0.0.1:8080", "/docs", nil)
+	if got[0] != "    http://127.0.0.1:8080/docs/" {
+		t.Errorf("prefix not applied: %q", got[0])
+	}
+}
+
+func TestListenerLines_IPv6Bracketed(t *testing.T) {
+	got := web.FormatListenerLinesForTest("[::1]:8080", "", nil)
+	if got[0] != "    http://[::1]:8080/" {
+		t.Errorf("IPv6 bracketing: %q", got[0])
+	}
+}
+
+func equalLines(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // --- markup view toggle ---
 
 func TestMarkupView_OptIn(t *testing.T) {

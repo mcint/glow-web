@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -78,14 +79,84 @@ func (s *Server) Handler() http.Handler {
 }
 
 // Serve binds addr and blocks. Useful for the CLI; tests should use Handler().
+//
+// We bind first then log so the URLs reflect the actual port (handles `:0`)
+// and a bind failure surfaces before the misleading "serving …" notice.
 func (s *Server) Serve(addr string) error {
-	prefix := s.URLPrefix
-	if prefix == "" {
-		prefix = "/"
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
 	}
-	fmt.Fprintf(os.Stderr, "glow-web %s: serving %s on http://%s%s\n",
-		version.String(), s.Root, addr, prefix)
-	return http.ListenAndServe(addr, s.Handler())
+	fmt.Fprintf(os.Stderr, "glow-web %s — serving %s\n", version.String(), s.Root)
+	for _, line := range s.listenerLines(ln.Addr().String()) {
+		fmt.Fprintln(os.Stderr, line)
+	}
+	return http.Serve(ln, s.Handler())
+}
+
+// listenerLines formats one line per reachable URL for the bound address.
+// Wildcard binds expand to localhost plus any non-loopback IPv4 interfaces;
+// specific binds emit a single line. Each URL is on its own line with no
+// trailing punctuation so terminal linkifiers (iTerm2, VS Code, kitty, …)
+// turn it into a clickable target.
+func (s *Server) listenerLines(addr string) []string {
+	return formatListenerLines(addr, s.URLPrefix, nonLoopbackIPv4s())
+}
+
+// formatListenerLines is the pure version of listenerLines: lanIPs is passed
+// in so tests can drive deterministic output without depending on the host's
+// network configuration.
+func formatListenerLines(addr, urlPrefix string, lanIPs []string) []string {
+	suffix := urlPrefix + "/"
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return []string{"    http://" + addr + suffix}
+	}
+	if !isWildcardHost(host) {
+		return []string{"    " + buildURL(host, port, suffix)}
+	}
+	out := []string{"    " + buildURL("localhost", port, suffix) + "  (loopback)"}
+	for _, ip := range lanIPs {
+		out = append(out, "    "+buildURL(ip, port, suffix)+"  (lan)")
+	}
+	return out
+}
+
+func isWildcardHost(host string) bool {
+	switch host {
+	case "", "0.0.0.0", "::", "[::]":
+		return true
+	}
+	return false
+}
+
+func buildURL(host, port, suffix string) string {
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return "http://" + host + ":" + port + suffix
+}
+
+func nonLoopbackIPv4s() []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, a := range addrs {
+		ipNet, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip := ipNet.IP
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+			continue
+		}
+		if ip4 := ip.To4(); ip4 != nil {
+			out = append(out, ip4.String())
+		}
+	}
+	return out
 }
 
 // urlFor builds an externally-visible URL for the given relative file path
