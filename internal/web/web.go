@@ -47,7 +47,8 @@ type Server struct {
 	DefaultMarkup  bool         // when true, default view is hybrid markup; ?view=rendered overrides
 	CommandPalette bool         // when true, ⌘K / Ctrl-K opens a fuzzy file palette on every page
 	Theme          string       // "auto" (default), "light", or "dark"; user toggle in UI overrides
-	TitlePrefix    string       // prepended to <title>; empty disables. Default "glow-web".
+	TitlePrefix    string       // appended to <title>; "auto" = "glow-web:<port>", "" disables, else literal
+	Addr           string       // bound address (e.g. "127.0.0.1:8080"); set by CLI and updated after net.Listen
 }
 
 // NewServer constructs a Server, autodetecting Mode from path's stat. walkOpts
@@ -88,13 +89,16 @@ func (s *Server) Handler() http.Handler {
 //
 // We bind first then log so the URLs reflect the actual port (handles `:0`)
 // and a bind failure surfaces before the misleading "serving …" notice.
+// The Server's Addr field is updated to the bound address so any
+// "auto"-style title prefix can interpolate the real port.
 func (s *Server) Serve(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
+	s.Addr = ln.Addr().String()
 	fmt.Fprintf(os.Stderr, "glow-web %s — serving %s\n", version.String(), s.Root)
-	for _, line := range s.listenerLines(ln.Addr().String()) {
+	for _, line := range s.listenerLines(s.Addr) {
 		fmt.Fprintln(os.Stderr, line)
 	}
 	return http.Serve(ln, s.Handler())
@@ -387,7 +391,7 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 	data.FilesURL = s.utilityURL("/_/files")
 	data.ServerTheme = s.serverTheme()
 	data.KeyPrefix = s.keyPrefix()
-	data.TitlePrefix = s.TitlePrefix
+	data.TitlePrefix = s.resolvedTitlePrefix()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := pageTmpl.ExecuteTemplate(w, "view.html.tmpl", data); err != nil {
 		fmt.Fprintf(os.Stderr, "glow-web: view template: %v\n", err)
@@ -410,7 +414,7 @@ func (s *Server) serveEdit(w http.ResponseWriter, src []byte, displayName, rel s
 		Palette:     s.CommandPalette,
 		ServerTheme: s.serverTheme(),
 		KeyPrefix:   s.keyPrefix(),
-		TitlePrefix: s.TitlePrefix,
+		TitlePrefix: s.resolvedTitlePrefix(),
 		Version:     version.String(),
 	}
 	if s.Mode == ModeDir {
@@ -441,6 +445,38 @@ func (s *Server) serverTheme() string {
 	default:
 		return "auto"
 	}
+}
+
+// resolvedTitlePrefix returns the literal string to render after the doc
+// title. The sentinel "auto" expands to "glow-web" plus the bound port if
+// known (so two instances on the same host but different ports get
+// distinguishable tabs). Empty disables the suffix entirely; any other
+// value passes through verbatim.
+func (s *Server) resolvedTitlePrefix() string {
+	if s.TitlePrefix == "" {
+		return ""
+	}
+	if s.TitlePrefix != "auto" {
+		return s.TitlePrefix
+	}
+	port := s.boundPort()
+	if port == "" {
+		return "glow-web"
+	}
+	return "glow-web:" + port
+}
+
+// boundPort extracts the port from s.Addr. Returns "" when Addr isn't set
+// (e.g. tests using Handler() without Serve()).
+func (s *Server) boundPort() string {
+	if s.Addr == "" {
+		return ""
+	}
+	_, port, err := net.SplitHostPort(s.Addr)
+	if err != nil {
+		return ""
+	}
+	return port
 }
 
 // keyPrefix is the localStorage namespace for this server's UI state. Two
@@ -609,7 +645,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		Palette:     s.CommandPalette,
 		ServerTheme: s.serverTheme(),
 		KeyPrefix:   s.keyPrefix(),
-		TitlePrefix: s.TitlePrefix,
+		TitlePrefix: s.resolvedTitlePrefix(),
 		Version:     version.String(),
 	}
 	if err := pageTmpl.ExecuteTemplate(w, "index.html.tmpl", data); err != nil {

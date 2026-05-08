@@ -39,7 +39,21 @@ go install github.com/mcint/glow-web/cmd/glow-web@latest
 
 # Or build from a checkout
 git clone https://github.com/mcint/glow-web && cd glow-web
-go build -o glow-web ./cmd/glow-web
+make build      # → ./bin/glow-web   (or `go build -o glow-web ./cmd/glow-web`)
+```
+
+## Dev tasks
+
+A `Makefile` exposes the common loop. `make` with no target runs the
+commit gate (`fmt-check + vet + test`):
+
+```sh
+make help          # show all targets
+make build         # → ./bin/glow-web
+make test          # go test ./...
+make check         # fmt-check + vet + test (the commit gate)
+make run           # build + serve project root on 127.0.0.1:8080
+make screenshots   # re-capture README screenshots (needs playwright + chromium)
 ```
 
 ## Quick start

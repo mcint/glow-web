@@ -68,7 +68,7 @@ func runWeb(args []string) {
 	markupDefault := fs.Bool("markup", false, "default to hybrid markup view (toggle with ?view=rendered)")
 	palette := fs.Bool("palette", true, "enable ⌘K / Ctrl-K command palette (use --palette=false to disable)")
 	theme := fs.String("theme", "auto", "default theme: auto | light | dark (browser toggle overrides)")
-	titlePrefix := fs.String("title-prefix", "glow-web", `prepended to <title>; empty disables. Add port to distinguish instances, e.g. "glow-web:8080"`)
+	titlePrefix := fs.String("title-prefix", "auto", `<title> rendered as "<doc> · <prefix>". "auto" expands to "glow-web:<port>"; "" disables; any other value passes through verbatim.`)
 	parseIntermixed(fs, args)
 	if fs.NArg() < 1 {
 		fmt.Fprintln(os.Stderr, "glow-web web: missing PATH (file or directory)")
@@ -96,6 +96,7 @@ func runWeb(args []string) {
 	s.CommandPalette = *palette
 	s.Theme = *theme
 	s.TitlePrefix = *titlePrefix
+	s.Addr = *addr
 	if err := s.Serve(*addr); err != nil {
 		die(err)
 	}

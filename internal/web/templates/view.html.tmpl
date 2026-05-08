@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{if .TitlePrefix}}{{.TitlePrefix}}: {{end}}{{.Title}}</title>
+<title>{{.Title}}{{if .TitlePrefix}} · {{.TitlePrefix}}{{end}}</title>
 {{template "theme-init" .}}
 {{template "style" .}}
 </head>

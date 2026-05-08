@@ -191,22 +191,20 @@ func TestDirMode_PathTraversalRejected(t *testing.T) {
 
 // --- title prefix ---
 
-func TestTitlePrefix_DefaultPrependsGlowWeb(t *testing.T) {
+func TestTitlePrefix_LiteralValueAppendsAfterDoc(t *testing.T) {
 	_, s := dirFixture(t) // dirFixture sets TitlePrefix = "glow-web"
 	rec := serve(s.Handler(), "GET", "/alpha.md", "")
-	if !strings.Contains(rec.Body.String(), `<title>glow-web: alpha.md</title>`) {
-		t.Errorf("default prefix not applied: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `<title>alpha.md · glow-web</title>`) {
+		t.Errorf("literal prefix not applied: %s", rec.Body.String())
 	}
 }
 
-func TestTitlePrefix_IndexAlsoPrefixed(t *testing.T) {
+func TestTitlePrefix_IndexAlsoSuffixed(t *testing.T) {
 	dir, s := dirFixture(t)
 	_ = dir
 	rec := serve(s.Handler(), "GET", "/", "")
-	body := rec.Body.String()
-	// Index Title is the project basename (the temp dir's basename).
-	if !strings.Contains(body, `<title>glow-web: `) {
-		t.Errorf("index title missing prefix: %s", body)
+	if !strings.Contains(rec.Body.String(), ` · glow-web</title>`) {
+		t.Errorf("index title missing prefix suffix: %s", rec.Body.String())
 	}
 }
 
@@ -219,12 +217,32 @@ func TestTitlePrefix_EmptyDisables(t *testing.T) {
 	}
 }
 
-func TestTitlePrefix_CustomWithPort(t *testing.T) {
+func TestTitlePrefix_AutoExpandsWithPort(t *testing.T) {
 	_, s := dirFixture(t)
-	s.TitlePrefix = "glow-web:8080"
+	s.TitlePrefix = "auto"
+	s.Addr = "127.0.0.1:18099"
 	rec := serve(s.Handler(), "GET", "/alpha.md", "")
-	if !strings.Contains(rec.Body.String(), `<title>glow-web:8080: alpha.md</title>`) {
-		t.Errorf("custom prefix with port not applied: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `<title>alpha.md · glow-web:18099</title>`) {
+		t.Errorf("auto + Addr should produce 'glow-web:18099': %s", rec.Body.String())
+	}
+}
+
+func TestTitlePrefix_AutoNoAddrJustGlowWeb(t *testing.T) {
+	_, s := dirFixture(t)
+	s.TitlePrefix = "auto"
+	s.Addr = ""
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	if !strings.Contains(rec.Body.String(), `<title>alpha.md · glow-web</title>`) {
+		t.Errorf("auto without Addr should fall back to bare 'glow-web': %s", rec.Body.String())
+	}
+}
+
+func TestTitlePrefix_CustomLiteral(t *testing.T) {
+	_, s := dirFixture(t)
+	s.TitlePrefix = "docs-of-truth"
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	if !strings.Contains(rec.Body.String(), `<title>alpha.md · docs-of-truth</title>`) {
+		t.Errorf("custom literal not applied verbatim: %s", rec.Body.String())
 	}
 }
 
@@ -639,7 +657,7 @@ func TestEdit_PageRenders(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		`<title>glow-web: alpha.md (edit)</title>`,
+		`<title>alpha.md (edit) · glow-web</title>`,
 		`<textarea id="src"`,
 		`# Alpha`, // source filled in
 		`const RENDER_URL = "/_/render"`,
