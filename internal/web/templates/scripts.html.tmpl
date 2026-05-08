@@ -1,4 +1,51 @@
 {{define "scripts"}}
+<script>
+// theme toggle: cycles auto → light → dark → auto, persists in localStorage,
+// and re-applies on system preference changes when in 'auto' mode. The
+// theme-init partial in <head> handles the initial paint; this just wires
+// up the bar button and runtime cycling.
+(function() {
+  var btn = document.getElementById('theme-toggle');
+  if (!btn) return;
+  var ICONS  = {auto: '◐', light: '☀', dark: '☾'};
+  var ORDER  = ['auto', 'light', 'dark'];
+  function getChoice() {
+    try { return localStorage.getItem('glow-theme') || 'auto'; }
+    catch (e) { return 'auto'; }
+  }
+  function setChoice(c) {
+    try {
+      if (c === 'auto') localStorage.removeItem('glow-theme');
+      else              localStorage.setItem('glow-theme', c);
+    } catch (e) {}
+    apply();
+    paint();
+  }
+  function apply() {
+    var c = getChoice();
+    var systemDark = window.matchMedia &&
+                     window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var t = (c === 'auto') ? (systemDark ? 'dark' : 'light') : c;
+    document.documentElement.setAttribute('data-theme', t);
+  }
+  function paint() {
+    var c = getChoice();
+    btn.textContent = ICONS[c] || ICONS.auto;
+    btn.title = 'theme: ' + c + ' (click to cycle)';
+    btn.setAttribute('aria-label', 'theme: ' + c);
+  }
+  btn.addEventListener('click', function() {
+    var cur = getChoice();
+    setChoice(ORDER[(ORDER.indexOf(cur) + 1) % ORDER.length]);
+  });
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
+      if (getChoice() === 'auto') apply();
+    });
+  }
+  paint();
+})();
+</script>
 {{if .Palette}}
 <div id="palette" class="palette" hidden role="dialog" aria-label="navigate">
   <div class="palette-box">

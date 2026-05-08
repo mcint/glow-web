@@ -187,6 +187,59 @@ func TestDirMode_PathTraversalRejected(t *testing.T) {
 	}
 }
 
+// --- theme (auto/light/dark) ---
+
+func TestTheme_DefaultAutoBakedIntoInitScript(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	body := rec.Body.String()
+	// theme-init script ships in <head>
+	if !strings.Contains(body, `var server = "auto"`) {
+		t.Errorf("default --theme=auto should bake server=\"auto\" into theme-init: %s", body)
+	}
+	// toggle button ships in bar
+	if !strings.Contains(body, `id="theme-toggle"`) {
+		t.Errorf("bar missing theme toggle button")
+	}
+}
+
+func TestTheme_LightFlagBakedIn(t *testing.T) {
+	_, s := dirFixture(t)
+	s.Theme = "light"
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	if !strings.Contains(rec.Body.String(), `var server = "light"`) {
+		t.Errorf("--theme=light should bake server=\"light\" into theme-init")
+	}
+}
+
+func TestTheme_DarkFlagBakedIn(t *testing.T) {
+	_, s := dirFixture(t)
+	s.Theme = "dark"
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	if !strings.Contains(rec.Body.String(), `var server = "dark"`) {
+		t.Errorf("--theme=dark should bake server=\"dark\" into theme-init")
+	}
+}
+
+func TestTheme_InvalidValueFallsBackToAuto(t *testing.T) {
+	_, s := dirFixture(t)
+	s.Theme = "purple-haze"
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	if !strings.Contains(rec.Body.String(), `var server = "auto"`) {
+		t.Errorf("invalid --theme value should normalise to auto")
+	}
+}
+
+func TestTheme_TogglePresentOnAllPages(t *testing.T) {
+	_, s := dirFixture(t)
+	for _, path := range []string{"/", "/alpha.md", "/alpha.md?edit=1"} {
+		rec := serve(s.Handler(), "GET", path, "")
+		if !strings.Contains(rec.Body.String(), `id="theme-toggle"`) {
+			t.Errorf("path %q missing theme toggle", path)
+		}
+	}
+}
+
 // --- command palette + /_/files + index filter ---
 
 func TestFilesEndpoint_DirMode(t *testing.T) {

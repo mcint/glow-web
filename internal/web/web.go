@@ -45,6 +45,7 @@ type Server struct {
 	ReadOnly       bool         // disables edit + save (also hides Edit link)
 	DefaultMarkup  bool         // when true, default view is hybrid markup; ?view=rendered overrides
 	CommandPalette bool         // when true, ⌘K / Ctrl-K opens a fuzzy file palette on every page
+	Theme          string       // "auto" (default), "light", or "dark"; user toggle in UI overrides
 }
 
 // NewServer constructs a Server, autodetecting Mode from path's stat. walkOpts
@@ -382,6 +383,7 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 	}
 	data.Palette = s.CommandPalette
 	data.FilesURL = s.utilityURL("/_/files")
+	data.ServerTheme = s.serverTheme()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := pageTmpl.ExecuteTemplate(w, "view.html.tmpl", data); err != nil {
 		fmt.Fprintf(os.Stderr, "glow-web: view template: %v\n", err)
@@ -391,18 +393,19 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 func (s *Server) serveEdit(w http.ResponseWriter, src []byte, displayName, rel string) {
 	selfURL := s.urlFor(rel)
 	data := pageData{
-		Title:     displayName + " (edit)",
-		Name:      displayName,
-		Path:      displayPath(displayName, rel),
-		Crumbs:    s.crumbsForFile(rel, displayName),
-		Source:    string(src),
-		ViewURL:   selfURL,
-		SaveURL:   selfURL,
-		RenderURL: s.utilityURL("/_/render"),
-		FilesURL:  s.utilityURL("/_/files"),
-		ShowSave:  true,
-		Palette:   s.CommandPalette,
-		Version:   version.String(),
+		Title:       displayName + " (edit)",
+		Name:        displayName,
+		Path:        displayPath(displayName, rel),
+		Crumbs:      s.crumbsForFile(rel, displayName),
+		Source:      string(src),
+		ViewURL:     selfURL,
+		SaveURL:     selfURL,
+		RenderURL:   s.utilityURL("/_/render"),
+		FilesURL:    s.utilityURL("/_/files"),
+		ShowSave:    true,
+		Palette:     s.CommandPalette,
+		ServerTheme: s.serverTheme(),
+		Version:     version.String(),
 	}
 	if s.Mode == ModeDir {
 		data.IndexURL = s.urlFor("")
@@ -420,6 +423,18 @@ func (s *Server) utilityURL(p string) string {
 		return p
 	}
 	return s.URLPrefix + p
+}
+
+// serverTheme normalises the configured Theme into one of "auto", "light",
+// or "dark". The value is baked into the theme-init script so the page can
+// pick the right colour scheme before paint.
+func (s *Server) serverTheme() string {
+	switch s.Theme {
+	case "light", "dark":
+		return s.Theme
+	default:
+		return "auto"
+	}
 }
 
 // displayPath returns the friendly "/foo.md" or "/sub/foo.md" string shown in
@@ -563,15 +578,16 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data := indexData{
-		Title:    filepath.Base(s.Root),
-		Path:     displayRoot(s.Root),
-		Crumbs:   s.crumbsForIndex(prefixFilter),
-		Filter:   prefixFilter,
-		Files:    items,
-		Count:    len(items),
-		FilesURL: s.utilityURL("/_/files"),
-		Palette:  s.CommandPalette,
-		Version:  version.String(),
+		Title:       filepath.Base(s.Root),
+		Path:        displayRoot(s.Root),
+		Crumbs:      s.crumbsForIndex(prefixFilter),
+		Filter:      prefixFilter,
+		Files:       items,
+		Count:       len(items),
+		FilesURL:    s.utilityURL("/_/files"),
+		Palette:     s.CommandPalette,
+		ServerTheme: s.serverTheme(),
+		Version:     version.String(),
 	}
 	if err := pageTmpl.ExecuteTemplate(w, "index.html.tmpl", data); err != nil {
 		fmt.Fprintf(os.Stderr, "glow-web: index template: %v\n", err)
@@ -727,7 +743,8 @@ type pageData struct {
 	ToggleLabel string // label shown on the toggle button
 	ShowSave    bool
 	Markup      bool
-	Palette     bool // include command palette overlay + script
+	Palette     bool   // include command palette overlay + script
+	ServerTheme string // "auto" | "light" | "dark"; baked into theme-init script
 	Version     string
 }
 
@@ -740,15 +757,16 @@ type indexItem struct {
 }
 
 type indexData struct {
-	Title    string
-	Path     string  // home-relative project root, shown in footer
-	Crumbs   []crumb // breadcrumb nav for current prefix filter
-	Filter   string  // current prefix filter (e.g. "sub/"); empty means root
-	Files    []indexItem
-	Count    int
-	FilesURL string // /_/files endpoint, used by command palette
-	Palette  bool   // include command palette overlay + script
-	Version  string
+	Title       string
+	Path        string  // home-relative project root, shown in footer
+	Crumbs      []crumb // breadcrumb nav for current prefix filter
+	Filter      string  // current prefix filter (e.g. "sub/"); empty means root
+	Files       []indexItem
+	Count       int
+	FilesURL    string // /_/files endpoint, used by command palette
+	Palette     bool   // include command palette overlay + script
+	ServerTheme string // "auto" | "light" | "dark"; baked into theme-init script
+	Version     string
 }
 
 // Backwards-compat shims for the existing CLI and tests.

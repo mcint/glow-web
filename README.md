@@ -12,14 +12,16 @@ See [`specs/spec.md`](specs/spec.md) for vision, scope, and architecture.
 
 ## Screenshots
 
-| Index (project file list with fuzzy filter) | Rendered view |
+| Index (project file list with fuzzy filter) | Rendered view (light) |
 | :---: | :---: |
 | ![index](docs/screenshots/index.png) | ![view](docs/screenshots/view.png) |
 
-Hybrid markup view (`?view=markup` — markdown markers stay visible, content
-styled):
+| Hybrid markup view | Dark theme |
+| :---: | :---: |
+| ![markup](docs/screenshots/markup.png) | ![dark](docs/screenshots/dark.png) |
 
-![markup](docs/screenshots/markup.png)
+The bar's `◐` button cycles auto → light → dark; the choice persists in
+`localStorage` and overrides the system preference.
 
 ## Install
 
@@ -71,6 +73,7 @@ glow-web version
 --readonly                 disable the edit page and save endpoint
 --markup                   default to hybrid markup view
 --palette=true             ⌘K / Ctrl-K command palette (default on)
+--theme auto               auto | light | dark (browser toggle overrides)
 ```
 
 ## Status

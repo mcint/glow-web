@@ -1,0 +1,27 @@
+{{define "theme-init"}}
+<script>
+// Resolve the effective theme before paint to avoid a flash of light content
+// on dark-preferring systems. Order of precedence:
+//   1. localStorage 'glow-theme' = 'light' | 'dark' | 'auto'  (user toggle)
+//   2. server-rendered initial = {{.ServerTheme}}             (--theme flag)
+//   3. window.matchMedia(prefers-color-scheme)
+(function() {
+  var stored = null;
+  try { stored = localStorage.getItem('glow-theme'); } catch (e) {}
+  var server = {{.ServerTheme}};
+  var systemDark = window.matchMedia &&
+                   window.matchMedia('(prefers-color-scheme: dark)').matches;
+  var theme;
+  if (stored === 'light' || stored === 'dark') {
+    theme = stored;
+  } else if (stored === 'auto') {
+    theme = systemDark ? 'dark' : 'light';
+  } else if (server === 'light' || server === 'dark') {
+    theme = server;
+  } else {
+    theme = systemDark ? 'dark' : 'light';
+  }
+  document.documentElement.setAttribute('data-theme', theme);
+})();
+</script>
+{{end}}
