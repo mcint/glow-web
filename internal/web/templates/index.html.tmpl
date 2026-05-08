@@ -8,19 +8,16 @@
 </head>
 <body>
 <header class="bar">
-  <div class="bar-title">
-    <h1 class="bar-name">{{.Title}}</h1>
-    <span class="bar-path">{{.Path}}</span>
-  </div>
+  {{template "crumbs" .}}
   <nav class="bar-actions">
-    <span class="bar-path">{{.Count}} files</span>
+    <span class="bar-path" id="count">{{.Count}} files</span>
   </nav>
 </header>
 <main>
 <ul class="files">
   {{range .Files}}
-  <li>
-    <a href="{{.URL}}">{{.Rel}}</a>
+  <li data-rel="{{.Rel}}">
+    <a href="{{.URL}}">{{.Display}}</a>
     <span class="size">{{.Size}} B</span>
   </li>
   {{else}}

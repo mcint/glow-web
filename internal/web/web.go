@@ -176,6 +176,99 @@ func (s *Server) urlFor(rel string) string {
 	return base + "/" + strings.Join(parts, "/")
 }
 
+// urlForIndex builds the URL for the index page, optionally filtered to files
+// whose Rel begins with prefixFilter. prefixFilter uses forward slashes and
+// always ends with a slash (e.g. "sub/", "sub/deep/"); empty means no filter.
+func (s *Server) urlForIndex(prefixFilter string) string {
+	base := s.URLPrefix
+	if base == "" {
+		base = ""
+	}
+	if prefixFilter == "" {
+		if base == "" {
+			return "/"
+		}
+		return base + "/"
+	}
+	q := url.Values{}
+	q.Set("prefix", prefixFilter)
+	root := base
+	if root == "" {
+		root = ""
+	}
+	return root + "/?" + q.Encode()
+}
+
+// crumb is one segment of a breadcrumb nav. URL == "" means current page.
+type crumb struct {
+	Name string
+	URL  string
+}
+
+// crumbsForFile builds breadcrumbs for a file view: project-name-or-file →
+// each path segment → the file itself. In ModeFile we have no index to link
+// back to, so the file is the only crumb.
+func (s *Server) crumbsForFile(rel, displayName string) []crumb {
+	if s.Mode == ModeFile {
+		return []crumb{{Name: displayName}}
+	}
+	out := []crumb{{Name: filepath.Base(s.Root), URL: s.urlForIndex("")}}
+	if rel == "" {
+		return out
+	}
+	parts := strings.Split(rel, "/")
+	var accum string
+	for i, p := range parts {
+		last := i == len(parts)-1
+		if last {
+			out = append(out, crumb{Name: p})
+			continue
+		}
+		accum += p + "/"
+		out = append(out, crumb{Name: p, URL: s.urlForIndex(accum)})
+	}
+	return out
+}
+
+// crumbsForIndex builds breadcrumbs for the index view at a given prefix
+// filter. Empty prefix returns just the project root crumb (current).
+func (s *Server) crumbsForIndex(prefixFilter string) []crumb {
+	rootName := filepath.Base(s.Root)
+	if prefixFilter == "" {
+		return []crumb{{Name: rootName}}
+	}
+	out := []crumb{{Name: rootName, URL: s.urlForIndex("")}}
+	cleaned := strings.TrimSuffix(prefixFilter, "/")
+	parts := strings.Split(cleaned, "/")
+	var accum string
+	for i, p := range parts {
+		last := i == len(parts)-1
+		accum += p + "/"
+		if last {
+			out = append(out, crumb{Name: p})
+		} else {
+			out = append(out, crumb{Name: p, URL: s.urlForIndex(accum)})
+		}
+	}
+	return out
+}
+
+// displayRoot returns a friendly form of an absolute path: "~/foo" if it lies
+// under the user's home, otherwise the absolute path verbatim.
+func displayRoot(abs string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return abs
+	}
+	if abs == home {
+		return "~"
+	}
+	if strings.HasPrefix(abs, home+string(os.PathSeparator)) {
+		return "~" + abs[len(home):]
+	}
+	return abs
+}
+
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		s.handleSave(w, r)
@@ -261,6 +354,7 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 		Title:       displayName,
 		Name:        displayName,
 		Path:        displayPath(displayName, rel),
+		Crumbs:      s.crumbsForFile(rel, displayName),
 		Body:        template.HTML(body),
 		ViewURL:     selfURL,
 		RawURL:      selfURL + "?raw=1",
@@ -297,6 +391,7 @@ func (s *Server) serveEdit(w http.ResponseWriter, src []byte, displayName, rel s
 		Title:     displayName + " (edit)",
 		Name:      displayName,
 		Path:      displayPath(displayName, rel),
+		Crumbs:    s.crumbsForFile(rel, displayName),
 		Source:    string(src),
 		ViewURL:   selfURL,
 		SaveURL:   selfURL,
@@ -341,19 +436,27 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	prefixFilter := normalizePrefixFilter(r.URL.Query().Get("prefix"))
+
 	items := make([]indexItem, 0, len(files))
 	for _, f := range files {
+		if prefixFilter != "" && !strings.HasPrefix(f.Rel, prefixFilter) {
+			continue
+		}
 		items = append(items, indexItem{
-			Rel:  f.Rel,
-			Name: f.Name,
-			URL:  s.urlFor(f.Rel),
-			Size: f.Size,
+			Rel:     f.Rel,
+			Display: strings.TrimPrefix(f.Rel, prefixFilter),
+			Name:    f.Name,
+			URL:     s.urlFor(f.Rel),
+			Size:    f.Size,
 		})
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data := indexData{
 		Title:   filepath.Base(s.Root),
-		Path:    s.Root,
+		Path:    displayRoot(s.Root),
+		Crumbs:  s.crumbsForIndex(prefixFilter),
+		Filter:  prefixFilter,
 		Files:   items,
 		Count:   len(items),
 		Version: version.String(),
@@ -361,6 +464,25 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	if err := pageTmpl.ExecuteTemplate(w, "index.html.tmpl", data); err != nil {
 		fmt.Fprintf(os.Stderr, "glow-web: index template: %v\n", err)
 	}
+}
+
+// normalizePrefixFilter cleans a user-supplied prefix into the canonical
+// "sub/" or "sub/deep/" form (forward slashes, trailing slash, no leading
+// slash, no dotty traversal).
+func normalizePrefixFilter(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	s = strings.TrimPrefix(s, "/")
+	cleaned := path.Clean(s)
+	if cleaned == "." || strings.HasPrefix(cleaned, "..") {
+		return ""
+	}
+	if !strings.HasSuffix(cleaned, "/") {
+		cleaned += "/"
+	}
+	return cleaned
 }
 
 // handleRender powers the live-preview pane: POST a markdown body, get the
@@ -447,6 +569,7 @@ type pageData struct {
 	Title       string
 	Name        string
 	Path        string
+	Crumbs      []crumb
 	Body        template.HTML
 	Source      string // edit page only
 	IndexURL    string
@@ -464,15 +587,18 @@ type pageData struct {
 }
 
 type indexItem struct {
-	Rel  string
-	Name string
-	URL  string
-	Size int64
+	Rel     string
+	Display string // path with current prefix-filter trimmed off
+	Name    string
+	URL     string
+	Size    int64
 }
 
 type indexData struct {
 	Title   string
-	Path    string
+	Path    string  // home-relative project root, shown in footer
+	Crumbs  []crumb // breadcrumb nav for current prefix filter
+	Filter  string  // current prefix filter (e.g. "sub/"); empty means root
 	Files   []indexItem
 	Count   int
 	Version string

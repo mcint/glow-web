@@ -25,7 +25,7 @@ func TestFileHandler_RendersFixture(t *testing.T) {
 	for _, want := range []string{
 		"<!doctype html>",
 		`<title>sample.md</title>`,
-		`class="bar-name">sample.md`,
+		`<span class="crumb crumb-current">sample.md</span>`,
 		`<h1 id="sample">Sample</h1>`,
 		`<code class="language-go">`,
 		`href="/?raw=1"`,
@@ -93,6 +93,7 @@ func TestDirMode_IndexListsDiscoveredFiles(t *testing.T) {
 	for _, want := range []string{
 		`href="/alpha.md"`,
 		`href="/sub/beta.md"`,
+		`data-rel="alpha.md"`,
 		"2 files",
 	} {
 		if !strings.Contains(body, want) {
@@ -107,21 +108,61 @@ func TestDirMode_IndexListsDiscoveredFiles(t *testing.T) {
 }
 
 func TestDirMode_RendersFile(t *testing.T) {
-	_, s := dirFixture(t)
+	dir, s := dirFixture(t)
 	rec := serve(s.Handler(), "GET", "/sub/beta.md", "")
 	if rec.Code != 200 {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	body := rec.Body.String()
+	rootName := filepath.Base(dir)
 	for _, want := range []string{
 		`<h1 id="beta">Beta</h1>`,
-		`class="bar-name">beta.md`,
-		`>/sub/beta.md<`, // path display
-		`href="/"`,       // back-to-index
+		`<span class="crumb crumb-current">beta.md</span>`,
+		`<a class="crumb" href="/">` + rootName + `</a>`,
+		`<a class="crumb" href="/?prefix=sub%2F">sub</a>`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("view missing %q", want)
+			t.Errorf("view missing %q\n--- body ---\n%s", want, body)
 		}
+	}
+}
+
+func TestDirMode_IndexPrefixFilter(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/?prefix=sub/", "")
+	if rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `href="/sub/beta.md"`) {
+		t.Errorf("filtered index missing beta link")
+	}
+	// alpha.md is at root, must not appear under prefix=sub/
+	if strings.Contains(body, `href="/alpha.md"`) {
+		t.Errorf("filtered index should hide alpha.md")
+	}
+	if !strings.Contains(body, `<span class="crumb crumb-current">sub</span>`) {
+		t.Errorf("filtered index should show 'sub' as current crumb")
+	}
+	// Display should drop the prefix in the listing
+	if !strings.Contains(body, `>beta.md</a>`) {
+		t.Errorf("filtered listing should show prefix-trimmed display name")
+	}
+	// "1 files" in the count
+	if !strings.Contains(body, "1 files") {
+		t.Errorf("count not 1 under prefix filter")
+	}
+}
+
+func TestDirMode_IndexPrefixFilterRejectsTraversal(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/?prefix=../etc/", "")
+	if rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	// Should fall back to no-filter (showing all 2 files)
+	if !strings.Contains(rec.Body.String(), "2 files") {
+		t.Errorf("traversal prefix should be rejected, falling through to root")
 	}
 }
 
@@ -362,6 +403,10 @@ func TestURLPrefix_RoutesUnderMount(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `href="/docs/alpha.md?raw=1"`) {
 		t.Errorf("self-links should carry prefix")
+	}
+	// Crumbs back to project root must also use the prefix
+	if !strings.Contains(rec.Body.String(), `<a class="crumb" href="/docs/">`) {
+		t.Errorf("project-root crumb should use URL prefix")
 	}
 }
 

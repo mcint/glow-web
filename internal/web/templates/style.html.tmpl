@@ -24,15 +24,21 @@ body {
   padding: .55rem 1rem; display: flex; align-items: center;
   gap: 1rem; flex-wrap: wrap;
 }
-.bar-title { display: flex; align-items: baseline; gap: .6rem; flex: 1; min-width: 0; }
-.bar-up { text-decoration: none; color: var(--muted); font-size: 1.15em; }
-.bar-up:hover { color: var(--accent); }
-.bar-name { font-size: 1rem; margin: 0; font-weight: 600; }
 .bar-path {
   color: var(--muted); font-size: .85em;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.crumbs {
+  display: flex; align-items: baseline; gap: .35em;
+  flex: 1; min-width: 0; flex-wrap: wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .95rem;
+}
+.crumb { color: var(--accent); text-decoration: none; font-weight: 500; }
+.crumb:hover { text-decoration: underline; }
+.crumb-current { color: var(--fg); font-weight: 600; }
+.crumb-sep { color: var(--muted); }
 .bar-actions { display: flex; gap: .4rem; align-items: center; }
 .bar-actions a, .bar-actions button {
   padding: .25rem .65rem; border: 1px solid var(--border);

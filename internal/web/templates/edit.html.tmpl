@@ -8,11 +8,7 @@
 </head>
 <body>
 <header class="bar">
-  <div class="bar-title">
-    {{if .IndexURL}}<a class="bar-up" href="{{.IndexURL}}" title="index">↑</a>{{end}}
-    <h1 class="bar-name">{{.Name}}</h1>
-    <span class="bar-path">{{.Path}}</span>
-  </div>
+  {{template "crumbs" .}}
   <nav class="bar-actions">
     <a href="{{.ViewURL}}">View</a>
     <button id="save" type="button">Save</button>
