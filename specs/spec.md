@@ -80,6 +80,41 @@ When `--url-prefix /P` is set, all routes mount under `/P`. The walk-result
 list is the security boundary: requests for files not in the list 404, so
 gitignored secrets stay un-served.
 
+### Title prefix and reverse-proxy deployments
+
+The default `--title-prefix=auto` expands to `glow-web:<port>` using the
+bound listener port, rendering tabs as `<doc> · glow-web:<port>`. That's
+useful when:
+
+- Multiple glow-web instances run on the same browser origin and you
+  want tabs recognisably distinct.
+- The bound port *is* the user-facing port (direct local use).
+
+It's noise — or actively misleading — when glow-web sits behind a
+reverse proxy: the bound port is internal (e.g. `:18099` on loopback)
+and the public-facing port is whatever the proxy fronts (e.g. `:443`).
+Showing the internal port leaks server topology and confuses anyone
+hunting tabs by URL.
+
+**Recommended settings:**
+
+| Deployment shape           | `--title-prefix`           | Why                              |
+| -------------------------- | -------------------------- | -------------------------------- |
+| Direct local, one instance | `auto` (default)           | Port distinguishes tabs cheaply  |
+| Multi-instance local       | `auto` (default)           | Port still does the work         |
+| Reverse-proxied            | `glow-web` or `"docs"`     | Hide the internal port           |
+| Reverse-proxied, multi-app | `"<app-name>"`             | Distinguish across services      |
+| Embedded in a frame        | `""` (empty, disables)     | Frame title isn't user-visible   |
+
+`--url-prefix /docs` is the matching knob for proxy mounts — combine the
+two when the server is fronted under a sub-path.
+
+**Future axis (not v0):** a `--title-prefix-port=auto|never|always`
+sub-flag, or a `{port}` template token in `--title-prefix`. We'd add
+this if the free-form string starts feeling cumbersome. For v0 the
+literal-or-sentinel approach keeps the policy in the user's hands and
+costs no parser surface.
+
 ### Browser-local UI state
 
 Three pieces of UI state persist in `localStorage` (no cookies, never sent
