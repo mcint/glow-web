@@ -187,6 +187,119 @@ func TestDirMode_PathTraversalRejected(t *testing.T) {
 	}
 }
 
+// --- intra-project link rewriting ---
+
+func TestDirMode_RewritesIntraProjectLinks(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "alpha.md"), `# Alpha
+
+See [beta](sub/beta.md), [also alpha](alpha.md), [external](https://example.com),
+[anchor](#section), [missing](nope.md).
+`)
+	mustMk(t, filepath.Join(dir, "sub"))
+	mustWrite(t, filepath.Join(dir, "sub", "beta.md"), "# Beta\n")
+
+	s, err := web.NewServer(dir, walk.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	body := rec.Body.String()
+
+	// Existing intra-project links rewritten to served URLs.
+	if !strings.Contains(body, `href="/sub/beta.md"`) {
+		t.Errorf("relative md link not rewritten: %s", body)
+	}
+	if !strings.Contains(body, `href="/alpha.md"`) {
+		t.Errorf("self-link not rewritten: %s", body)
+	}
+	// External, anchor, and missing links left alone.
+	if !strings.Contains(body, `href="https://example.com"`) {
+		t.Errorf("external link should not be rewritten")
+	}
+	if !strings.Contains(body, `href="#section"`) {
+		t.Errorf("anchor link should not be rewritten")
+	}
+	if !strings.Contains(body, `href="nope.md"`) {
+		t.Errorf("missing-target link should be left as-is (becomes a 404 if clicked) but stayed: %s", body)
+	}
+}
+
+func TestDirMode_LinkResolutionFromSubdir(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "top.md"), "# Top")
+	mustMk(t, filepath.Join(dir, "sub"))
+	mustWrite(t, filepath.Join(dir, "sub", "beta.md"), `# Beta
+
+[up to top](../top.md) and [sibling](beta.md).
+`)
+	s, err := web.NewServer(dir, walk.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := serve(s.Handler(), "GET", "/sub/beta.md", "")
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `href="/top.md"`) {
+		t.Errorf("../top.md should resolve to /top.md: %s", body)
+	}
+	if !strings.Contains(body, `href="/sub/beta.md"`) {
+		t.Errorf("sibling beta.md should resolve to /sub/beta.md: %s", body)
+	}
+}
+
+func TestDirMode_LinkResolutionRejectsRootEscape(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "doc.md"), `[escape](../../../etc/passwd)`)
+	s, err := web.NewServer(dir, walk.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := serve(s.Handler(), "GET", "/doc.md", "")
+	body := rec.Body.String()
+	// The escape attempt should NOT be rewritten — it stays as the original
+	// (broken) string and won't resolve against any served URL.
+	if !strings.Contains(body, `href="../../../etc/passwd"`) {
+		t.Errorf("traversal link should be left unchanged, got: %s", body)
+	}
+	// And critically — it must not have been turned into an absolute URL
+	// targeting anything inside the served root.
+	if strings.Contains(body, `href="/etc/passwd"`) || strings.Contains(body, `href="/passwd"`) {
+		t.Errorf("traversal must not collapse into a served URL: %s", body)
+	}
+}
+
+func TestDirMode_LinkResolutionWithURLPrefix(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a.md"), "[b](b.md)")
+	mustWrite(t, filepath.Join(dir, "b.md"), "# B")
+	s, err := web.NewServer(dir, walk.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.URLPrefix = "/docs"
+	rec := serve(s.Handler(), "GET", "/docs/a.md", "")
+	body := rec.Body.String()
+	if !strings.Contains(body, `href="/docs/b.md"`) {
+		t.Errorf("rewritten link should carry URL prefix: %s", body)
+	}
+}
+
+func TestDirMode_LinkResolutionPreservesAnchorAndQuery(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a.md"), `[deep](b.md#section "title")`)
+	mustWrite(t, filepath.Join(dir, "b.md"), "# B\n## Section\n")
+	s, err := web.NewServer(dir, walk.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := serve(s.Handler(), "GET", "/a.md", "")
+	body := rec.Body.String()
+	if !strings.Contains(body, `href="/b.md#section"`) {
+		t.Errorf("anchor should survive rewrite: %s", body)
+	}
+}
+
 // --- listener URL formatting ---
 
 func TestListenerLines_WildcardExpandsToLocalhostAndLAN(t *testing.T) {

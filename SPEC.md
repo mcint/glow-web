@@ -78,6 +78,57 @@ When `--url-prefix /P` is set, all routes mount under `/P`. The walk-result
 list is the security boundary: requests for files not in the list 404, so
 gitignored secrets stay un-served.
 
+## Intra-project link rewriting
+
+When a markdown link's destination resolves to a file in the same project, the
+HTML view rewrites the `href` to the served URL of that file — so clicking a
+relative `[foo](../sub/foo.md)` navigates inside the running server instead of
+404'ing in the browser.
+
+**What we rewrite (v0):**
+
+- Pure relative paths (`foo.md`, `../sub/foo.md`) joined to the current
+  document's directory, then path-cleaned.
+- Root-relative paths (`/sub/foo.md`) anchored at the project root.
+- Query and fragment suffixes (`b.md#section`, `b.md?raw=1`) survive intact.
+- The rewrite carries `--url-prefix` automatically.
+
+**What we leave alone:**
+
+- Anything with a URL scheme (`http:`, `https:`, `mailto:`, …) or
+  protocol-relative (`//host/…`) — these are external by definition.
+- Anchor-only refs (`#section`).
+- Targets that don't appear in the walk-result allowlist (so gitignored or
+  non-markdown files stay un-linked, matching the security boundary the
+  rest of the server already enforces).
+- Targets that escape the project root (`../../etc/passwd`) — left as the
+  original literal string, which will simply 404 if clicked.
+
+**Security model:**
+
+- The walk-result allowlist gates link rewriting the same way it gates file
+  serving. A gitignored file cannot be turned into a clickable served URL.
+- Path resolution uses `path.Clean` and rejects any cleaned form that starts
+  with `..`, so relative paths cannot pivot outside the served tree.
+- URL-encoded paths are decoded once before resolution to avoid
+  double-decoding bypasses.
+- We never *fetch* the target — the user must click. Browsers' same-origin
+  policy still applies; rewriting changes only the `href` attribute.
+
+**Future axes (not v0):**
+
+- Image rewriting (`*ast.Image` parallel of the link transform) for
+  intra-project image references. Same allowlist, plus consideration for
+  raw bytes vs. data-uri inlining.
+- Heading-anchor verification (rewrite `b.md#bad-anchor` to `b.md` if the
+  anchor isn't present in `b.md`'s rendered output).
+- Reference-style links and link definitions (`[a]: foo.md`).
+- Soft-resolution: if `[foo](foo)` doesn't match `foo` but matches `foo.md`,
+  rewrite. Adds least-surprise but can introduce ambiguity; gate behind a
+  flag.
+- Inverse map: a link-graph view (`?backlinks=1` shows which docs link
+  *to* the current doc).
+
 ## Semantic slicing — addressing model
 
 A heading path is a slash-separated list of heading texts, matched

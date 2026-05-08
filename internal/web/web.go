@@ -342,7 +342,9 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 	if markup {
 		body = render.HTMLMarkup(raw)
 	} else {
-		body, err = render.HTML(raw)
+		body, err = render.HTMLWithOptions(raw, render.Options{
+			LinkResolver: s.linkResolver(rel),
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -415,6 +417,102 @@ func displayPath(displayName, rel string) string {
 		return "/" + displayName
 	}
 	return "/" + rel
+}
+
+// linkResolver returns a function that maps a markdown link destination to
+// the served URL of the same file in this project, when the destination is
+// (a) relative, (b) resolvable to a path inside Root, and (c) corresponds to
+// a file in the walk result. Otherwise the destination is left unchanged so
+// external/anchor/non-md links continue to work.
+//
+// In ModeFile we have no project to resolve into, so the resolver is nil
+// (links pass through to the rendered HTML verbatim).
+func (s *Server) linkResolver(currentRel string) func(string) (string, bool) {
+	if s.Mode != ModeDir {
+		return nil
+	}
+	files, err := walk.Files(s.Walk)
+	if err != nil {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(files))
+	for _, f := range files {
+		allowed[f.Rel] = struct{}{}
+	}
+	return func(href string) (string, bool) {
+		if href == "" || isExternalLink(href) || strings.HasPrefix(href, "#") {
+			return "", false
+		}
+		// Strip and preserve query/fragment for re-attachment.
+		bare, suffix := splitURLSuffix(href)
+		decoded, err := url.PathUnescape(bare)
+		if err != nil {
+			decoded = bare
+		}
+		target := resolveRelativeLink(currentRel, decoded)
+		if target == "" {
+			return "", false
+		}
+		if _, ok := allowed[target]; !ok {
+			return "", false
+		}
+		return s.urlFor(target) + suffix, true
+	}
+}
+
+// isExternalLink returns true for hrefs that should never be rewritten —
+// anything with a URL scheme, a protocol-relative form, or a mailto/tel/etc.
+func isExternalLink(href string) bool {
+	lower := strings.ToLower(href)
+	if strings.HasPrefix(lower, "//") {
+		return true
+	}
+	// Detect "scheme:" prefix: a colon before any '/', '?', or '#'.
+	for i := 0; i < len(lower); i++ {
+		c := lower[i]
+		if c == ':' {
+			return true
+		}
+		if c == '/' || c == '?' || c == '#' {
+			return false
+		}
+	}
+	return false
+}
+
+// splitURLSuffix separates a bare path from its query and/or fragment, so
+// the path can be resolved on its own and the suffix reattached intact.
+func splitURLSuffix(href string) (bare, suffix string) {
+	if i := strings.IndexAny(href, "?#"); i >= 0 {
+		return href[:i], href[i:]
+	}
+	return href, ""
+}
+
+// resolveRelativeLink joins href to currentRel's directory (for pure relative
+// hrefs) or to the project root (for "/" anchored hrefs), then path-cleans the
+// result. Anything that escapes the project root after cleaning is rejected
+// (returns "") — the caller treats that as "leave the link unchanged."
+func resolveRelativeLink(currentRel, href string) string {
+	if href == "" {
+		return ""
+	}
+	var base string
+	if strings.HasPrefix(href, "/") {
+		base = strings.TrimPrefix(href, "/")
+	} else {
+		dir := path.Dir(currentRel)
+		if dir == "." || dir == "" {
+			base = href
+		} else {
+			base = dir + "/" + href
+		}
+	}
+	cleaned := path.Clean(base)
+	if cleaned == "." || cleaned == "" || strings.HasPrefix(cleaned, "..") {
+		return ""
+	}
+	return cleaned
 }
 
 // viewIsMarkup decides which renderer to use for the main view. The query
