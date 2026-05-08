@@ -8,7 +8,7 @@ gitignore-aware directory serving, click-navigable breadcrumbs, intra-project
 link rewriting, a hybrid Obsidian-like markup view, an edit page with live
 preview, and a `jq`-for-markdown CLI.
 
-See [`SPEC.md`](SPEC.md) for vision, scope, and architecture.
+See [`specs/spec.md`](specs/spec.md) for vision, scope, and architecture.
 
 ## Screenshots
 
@@ -43,10 +43,10 @@ go build -o glow-web ./cmd/glow-web
 ./glow-web render README.md --format html
 
 # Hybrid markup view to stdout (markers visible, content styled)
-./glow-web render SPEC.md --format markup
+./glow-web render specs/spec.md --format markup
 
 # Extract a section by heading path
-./glow-web slice SPEC.md --heading "Architecture"
+./glow-web slice specs/spec.md --heading "Architecture"
 
 # Print version
 ./glow-web version
@@ -66,6 +66,6 @@ go build -o glow-web ./cmd/glow-web
 
 ## Status
 
-v0 spike. See [`SPEC.md`](SPEC.md) for the planned surface and
-[`docs/notes/feature-toggles.md`](docs/notes/feature-toggles.md) for the
-design memo on how config will scale beyond per-flag bools.
+v0 spike. See [`specs/spec.md`](specs/spec.md) for the planned surface and
+[`specs/feature-toggles.md`](specs/feature-toggles.md) for the design memo
+on how config will scale beyond per-flag bools.
