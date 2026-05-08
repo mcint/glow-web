@@ -109,11 +109,19 @@ hunting tabs by URL.
 `--url-prefix /docs` is the matching knob for proxy mounts — combine the
 two when the server is fronted under a sub-path.
 
-**Future axis (not v0):** a `--title-prefix-port=auto|never|always`
-sub-flag, or a `{port}` template token in `--title-prefix`. We'd add
-this if the free-form string starts feeling cumbersome. For v0 the
-literal-or-sentinel approach keeps the policy in the user's hands and
-costs no parser surface.
+**`--title-prefix-port`** (default `auto`) tunes port behaviour when
+`--title-prefix=auto`. Three values:
+
+- `auto` (default) — include the port if it's known.
+- `never` — omit the port, suffix is just `glow-web`. Use behind a
+  reverse proxy where the bound port is internal.
+- `always` — same as `auto` for now (port if known); reserved as the
+  knob to use should glow-web ever pick up a port from a non-listener
+  source. Treat `auto` and `always` as synonyms today.
+
+The flag has no effect when `--title-prefix` is a literal (anything
+other than `auto`) — in that case the user's chosen string passes
+through verbatim regardless of port handling.
 
 ### Browser-local UI state
 

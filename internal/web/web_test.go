@@ -227,6 +227,28 @@ func TestTitlePrefix_AutoExpandsWithPort(t *testing.T) {
 	}
 }
 
+func TestTitlePrefix_PortNeverOmitsPort(t *testing.T) {
+	_, s := dirFixture(t)
+	s.TitlePrefix = "auto"
+	s.TitlePort = "never"
+	s.Addr = "127.0.0.1:18099"
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	if !strings.Contains(rec.Body.String(), `<title>alpha.md · glow-web</title>`) {
+		t.Errorf("--title-prefix-port=never should omit port: %s", rec.Body.String())
+	}
+}
+
+func TestTitlePrefix_PortNeverIgnoredForLiteralPrefix(t *testing.T) {
+	_, s := dirFixture(t)
+	s.TitlePrefix = "docs-of-truth"
+	s.TitlePort = "never"
+	s.Addr = "127.0.0.1:18099"
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	if !strings.Contains(rec.Body.String(), `<title>alpha.md · docs-of-truth</title>`) {
+		t.Errorf("port handling shouldn't affect literal prefix: %s", rec.Body.String())
+	}
+}
+
 func TestTitlePrefix_AutoNoAddrJustGlowWeb(t *testing.T) {
 	_, s := dirFixture(t)
 	s.TitlePrefix = "auto"

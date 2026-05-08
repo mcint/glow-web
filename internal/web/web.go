@@ -48,6 +48,7 @@ type Server struct {
 	CommandPalette bool         // when true, ⌘K / Ctrl-K opens a fuzzy file palette on every page
 	Theme          string       // "auto" (default), "light", or "dark"; user toggle in UI overrides
 	TitlePrefix    string       // appended to <title>; "auto" = "glow-web:<port>", "" disables, else literal
+	TitlePort      string       // "auto" (port if known), "never" (omit), "always" — only affects "auto" prefix
 	Addr           string       // bound address (e.g. "127.0.0.1:8080"); set by CLI and updated after net.Listen
 }
 
@@ -448,16 +449,19 @@ func (s *Server) serverTheme() string {
 }
 
 // resolvedTitlePrefix returns the literal string to render after the doc
-// title. The sentinel "auto" expands to "glow-web" plus the bound port if
-// known (so two instances on the same host but different ports get
-// distinguishable tabs). Empty disables the suffix entirely; any other
-// value passes through verbatim.
+// title. The sentinel "auto" expands to "glow-web" plus the bound port
+// (or not) per s.TitlePort: "auto"/"always" include the port when known,
+// "never" omits it. Empty TitlePrefix disables the suffix entirely; any
+// other literal value passes through verbatim regardless of TitlePort.
 func (s *Server) resolvedTitlePrefix() string {
 	if s.TitlePrefix == "" {
 		return ""
 	}
 	if s.TitlePrefix != "auto" {
 		return s.TitlePrefix
+	}
+	if s.TitlePort == "never" {
+		return "glow-web"
 	}
 	port := s.boundPort()
 	if port == "" {
