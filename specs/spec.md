@@ -79,6 +79,24 @@ When `--url-prefix /P` is set, all routes mount under `/P`. The walk-result
 list is the security boundary: requests for files not in the list 404, so
 gitignored secrets stay un-served.
 
+### Browser-local UI state
+
+Three pieces of UI state persist in `localStorage` (no cookies, never sent
+to the server):
+
+| Key                       | Purpose                                              |
+| ------------------------- | ---------------------------------------------------- |
+| `glow-theme`              | `light` / `dark` / `auto` — overrides `--theme` flag |
+| `glow-palette-open`       | `1` / `0` — sidebar open state restored on each page |
+| `glow-scroll:<pathname>`  | scroll position as fraction `0..1` per file          |
+
+The sidebar is left-anchored, slides in over the page, and shifts main
+content right via a body class. It opens on ⌘K / Ctrl-K, closes on Esc
+or another ⌘K, and stays pinned across page navigations so jump-back-
+and-forth between files doesn't require re-summoning it. Scroll memory
+restores on load except when the URL carries a `#anchor` (anchor scroll
+wins).
+
 ## Intra-project link rewriting
 
 When a markdown link's destination resolves to a file in the same project, the

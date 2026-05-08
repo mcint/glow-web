@@ -271,10 +271,20 @@ func TestPalette_RenderedWhenEnabled(t *testing.T) {
 		`id="palette"`,
 		`id="palette-input"`,
 		`const filesURL = "/_/files"`,
+		`STATE_KEY = 'glow-palette-open'`, // sidebar persistence
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("palette missing %q", want)
 		}
+	}
+}
+
+func TestScrollMemory_ShipsOnViewPages(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	body := rec.Body.String()
+	if !strings.Contains(body, `'glow-scroll:'`) {
+		t.Errorf("scroll-memory script missing on view page")
 	}
 }
 

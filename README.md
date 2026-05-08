@@ -20,8 +20,16 @@ See [`specs/spec.md`](specs/spec.md) for vision, scope, and architecture.
 | :---: | :---: |
 | ![markup](docs/screenshots/markup.png) | ![dark](docs/screenshots/dark.png) |
 
+Persistent file sidebar (⌘K / Ctrl-K, sticks across page navigations):
+
+![sidebar](docs/screenshots/sidebar.png)
+
 The bar's `◐` button cycles auto → light → dark; the choice persists in
-`localStorage` and overrides the system preference.
+`localStorage` and overrides the system preference. The sidebar opens on
+⌘K / Ctrl-K and stays pinned (close with Esc or another ⌘K) so you can
+jump between files without re-summoning it. The viewer also remembers the
+scroll position per file in `localStorage`, so coming back to a doc lands
+where you left off (skipped when the URL has a `#anchor`).
 
 ## Install
 
