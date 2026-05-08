@@ -68,22 +68,41 @@ function K(suffix) { return KEY_PREFIX + suffix; }
   // ---- shared fuzzy match ----
   // Subsequence match with fzf-style scoring: rewards contiguous runs and
   // word-boundary hits, penalises later positions. Lower score = better.
+  //
+  // Whitespace in the query splits it into ordered tokens — each token must
+  // subsequence-match in order, advancing past the previous token. Lets
+  // users type `cc 5w se` to match `cc/5wh/seed.md` (one token per path
+  // segment) without typing the slashes. Word-boundary bonus fires on a
+  // token's first char when it lands right after a `/` or `_`, so cleanly-
+  // segmented matches outscore cluttered ones.
   function fuzzyMatch(query, target) {
-    if (!query) return { match: true, indices: [], score: 0 };
-    const q = query.toLowerCase(), t = target.toLowerCase();
-    const indices = [];
-    let i = 0, score = 0, last = -2;
-    for (let j = 0; j < t.length && i < q.length; j++) {
-      if (t[j] === q[i]) {
-        indices.push(j);
-        if (j === last + 1) score -= 4;                          // contiguous bonus
-        if (j === 0 || /[\W_/]/.test(t[j-1])) score -= 6;        // word-boundary bonus
-        score += j * 0.5;                                        // earlier-is-better
-        last = j;
-        i++;
+    const trimmed = (query || '').trim();
+    if (!trimmed) return { match: true, indices: [], score: 0 };
+    const tokens = trimmed.toLowerCase().split(/\s+/);
+    const t = target.toLowerCase();
+    const allIndices = [];
+    let cursor = 0;
+    let totalScore = 0;
+    for (const tok of tokens) {
+      let i = 0, lastHit = -2;
+      const tokIdx = [];
+      let tokScore = 0;
+      for (let j = cursor; j < t.length && i < tok.length; j++) {
+        if (t[j] === tok[i]) {
+          tokIdx.push(j);
+          if (j === lastHit + 1) tokScore -= 4;                   // contiguous bonus
+          if (j === 0 || /[\W_/]/.test(t[j-1])) tokScore -= 6;    // word-boundary bonus
+          tokScore += j * 0.5;                                    // earlier-is-better
+          lastHit = j;
+          i++;
+        }
       }
+      if (i < tok.length) return { match: false, indices: [], score: 0 };
+      allIndices.push(...tokIdx);
+      totalScore += tokScore;
+      cursor = lastHit + 1;
     }
-    return { match: i === q.length, indices, score };
+    return { match: true, indices: allIndices, score: totalScore };
   }
   function escapeHTML(s) {
     return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
@@ -96,6 +115,33 @@ function K(suffix) { return KEY_PREFIX + suffix; }
       last = idx + 1;
     }
     return out + escapeHTML(text.slice(last));
+  }
+
+  // Split rel "specs/sub/foo.md" into [dir="specs/sub/", file="foo.md"].
+  // Highlight indices must be split too — directory keeps indices ≤ slash
+  // position, file gets the remaining indices shifted by (slash+1).
+  function renderSubPath(rel, indices) {
+    const slash = rel.lastIndexOf('/');
+    if (slash < 0) return highlight(rel, indices);
+    const dirText  = rel.slice(0, slash + 1);
+    const fileText = rel.slice(slash + 1);
+    const dirIdx   = (indices || []).filter(i => i <= slash);
+    const fileIdx  = (indices || []).filter(i => i >  slash).map(i => i - slash - 1);
+    return '<span class="path-dim">' + highlight(dirText, dirIdx) + '</span>' + highlight(fileText, fileIdx);
+  }
+
+  // Compact relative time: now / 5m / 3h / 2d / 6w / 4mo / 2y. Empty when
+  // mtime is 0 or missing.
+  function relTime(unixSec) {
+    if (!unixSec) return '';
+    const ageS = Math.max(0, Date.now()/1000 - unixSec);
+    if (ageS < 45)        return 'now';
+    if (ageS < 3600)      return Math.round(ageS/60) + 'm';
+    if (ageS < 86400)     return Math.round(ageS/3600) + 'h';
+    if (ageS < 86400*7)   return Math.round(ageS/86400) + 'd';
+    if (ageS < 86400*30)  return Math.round(ageS/(86400*7)) + 'w';
+    if (ageS < 86400*365) return Math.round(ageS/(86400*30)) + 'mo';
+    return Math.round(ageS/(86400*365)) + 'y';
   }
 
   // ---- index page inline filter (data already in DOM) ----
@@ -114,7 +160,11 @@ function K(suffix) { return KEY_PREFIX + suffix; }
         if (!s.match) { s.li.style.display = 'none'; continue; }
         s.li.style.display = '';
         const link = s.li.querySelector('a');
-        if (link) link.innerHTML = highlight(s.li.dataset.rel, s.indices);
+        if (link) link.innerHTML = renderSubPath(s.li.dataset.rel, s.indices);
+        // Replace the byte-size hint with relative-time when filtering.
+        const meta = s.li.querySelector('.size');
+        const t = relTime(parseInt(s.li.dataset.mtime || '0', 10));
+        if (meta && t) meta.textContent = t;
         indexList.appendChild(s.li);
         visible++;
       }
@@ -193,7 +243,10 @@ function K(suffix) { return KEY_PREFIX + suffix; }
   function paint() {
     results.innerHTML = current.map((s, i) => {
       const cls = i === selected ? 'palette-item palette-selected' : 'palette-item';
-      return `<li class="${cls}" data-i="${i}">${highlight(s.rel, s.indices)}</li>`;
+      const path = renderSubPath(s.rel, s.indices);
+      const t = relTime(s.mtime);
+      const time = t ? `<span class="palette-time">${t}</span>` : '';
+      return `<li class="${cls}" data-i="${i}"><span class="palette-path">${path}</span>${time}</li>`;
     }).join('');
     Array.from(results.children).forEach(li => {
       li.addEventListener('click', () => {

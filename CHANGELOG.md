@@ -9,6 +9,22 @@ While we're pre-1.0, minors are allowed to break things; patches will not.
 
 ## [Unreleased]
 
+### Added
+
+- `/_/files` JSON entries now carry `mtime` (Unix seconds). Index
+  page `<li>` elements get `data-mtime` for the same reason.
+- Filter rendering shows a relative-time hint (`5m` / `3h` / `2d` /
+  `4w` / …) next to each matched result in both the inline index
+  filter and the ⌘K sidebar.
+- Sub-path coloring: every filter result splits the rel into a dim
+  directory portion and a normal-weight filename. Match highlights
+  span both halves correctly so multi-segment hits stay legible.
+- Multi-token fuzzy match: whitespace in the query splits it into
+  ordered tokens that each subsequence-match in turn, advancing
+  past the previous token. Lets you type `cc 5w se` to find
+  `cc/5wh/seed.md` without typing slashes. Word-boundary bonus on
+  each token's first char rewards clean segment-aligned matches.
+
 ## [0.4.0] — 2026-05-07
 
 The "polish + identity" cut: titles are recognisable, multiple

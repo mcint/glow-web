@@ -333,13 +333,25 @@ func TestFilesEndpoint_DirMode(t *testing.T) {
 		t.Errorf("content-type = %q", ct)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{`"rel":"alpha.md"`, `"url":"/alpha.md"`, `"rel":"sub/beta.md"`} {
+	for _, want := range []string{
+		`"rel":"alpha.md"`, `"url":"/alpha.md"`, `"rel":"sub/beta.md"`,
+		`"mtime":`, // each entry carries a Unix timestamp
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/_/files missing %q in: %s", want, body)
 		}
 	}
 	if strings.Contains(body, "secret.md") {
 		t.Errorf("/_/files leaked gitignored entry: %s", body)
+	}
+}
+
+func TestIndexLi_HasMtimeAttribute(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/", "")
+	body := rec.Body.String()
+	if !strings.Contains(body, `data-mtime="`) {
+		t.Errorf("index <li> missing data-mtime attribute")
 	}
 }
 

@@ -20,7 +20,7 @@
 <main>
 <ul class="files">
   {{range .Files}}
-  <li data-rel="{{.Rel}}">
+  <li data-rel="{{.Rel}}" data-mtime="{{.Mtime}}">
     <a href="{{.URL}}">{{.Display}}</a>
     <span class="size">{{.Size}} B</span>
   </li>

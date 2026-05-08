@@ -635,6 +635,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 			Name:    f.Name,
 			URL:     s.urlFor(f.Rel),
 			Size:    f.Size,
+			Mtime:   f.ModTime.Unix(),
 		})
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -679,14 +680,18 @@ func normalizePrefixFilter(s string) string {
 // handleFiles emits the project's discovered file list as JSON, used as the
 // data source for the command palette. Walk-result-based, so gitignored
 // files don't leak (matches the index and link-rewriting allowlist).
+//
+// mtime ships as Unix seconds so the filter can render a relative-time
+// hint without another round-trip.
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	type entry struct {
-		Rel string `json:"rel"`
-		URL string `json:"url"`
+		Rel   string `json:"rel"`
+		URL   string `json:"url"`
+		Mtime int64  `json:"mtime"`
 	}
 	var out []entry
 	if s.Mode == ModeDir {
@@ -697,11 +702,15 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		}
 		out = make([]entry, len(files))
 		for i, f := range files {
-			out[i] = entry{Rel: f.Rel, URL: s.urlFor(f.Rel)}
+			out[i] = entry{Rel: f.Rel, URL: s.urlFor(f.Rel), Mtime: f.ModTime.Unix()}
 		}
 	} else {
 		// Single-file mode: one entry, the file itself.
-		out = []entry{{Rel: filepath.Base(s.Root), URL: s.urlFor("")}}
+		var mt int64
+		if info, err := os.Stat(s.Root); err == nil {
+			mt = info.ModTime().Unix()
+		}
+		out = []entry{{Rel: filepath.Base(s.Root), URL: s.urlFor(""), Mtime: mt}}
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(out)
@@ -819,6 +828,7 @@ type indexItem struct {
 	Name    string
 	URL     string
 	Size    int64
+	Mtime   int64 // Unix seconds, surfaced as data-mtime on the li for the inline filter
 }
 
 type indexData struct {

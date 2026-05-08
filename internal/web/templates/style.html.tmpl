@@ -174,11 +174,16 @@ mark { background: rgba(255, 215, 0, 0.45); color: inherit; padding: 0 .05em; bo
   padding: .45rem 1rem; cursor: pointer;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: .9rem; line-height: 1.4;
-  word-break: break-all;
+  display: flex; align-items: baseline; gap: .6em;
 }
 .palette-item:hover { background: var(--code-bg); }
 .palette-selected { background: var(--code-bg); }
-.palette-selected::before { content: "▸ "; color: var(--accent); }
+.palette-selected::before { content: "▸"; color: var(--accent); margin-right: .25em; }
+.palette-path { flex: 1; min-width: 0; word-break: break-all; }
+.palette-time { color: var(--muted); font-size: .8em; flex-shrink: 0; opacity: .75; }
+
+/* Sub-path coloring used by both the palette and the index inline filter */
+.path-dim { color: var(--muted); }
 
 /* When sidebar is pinned open, shift main content right so it doesn't
    get covered. On narrow viewports the sidebar takes the whole screen
