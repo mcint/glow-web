@@ -21,35 +21,44 @@ styled):
 
 ![markup](docs/screenshots/markup.png)
 
+## Install
+
+```sh
+# Install the latest commit on main into $GOBIN (or $GOPATH/bin)
+go install github.com/mcint/glow-web/cmd/glow-web@latest
+
+# Or build from a checkout
+git clone https://github.com/mcint/glow-web && cd glow-web
+go build -o glow-web ./cmd/glow-web
+```
+
 ## Quick start
 
 ```sh
-go build -o glow-web ./cmd/glow-web
-
 # Serve a directory at http://127.0.0.1:8080 (loopback only by default)
-./glow-web web .
+glow-web web .
 
 # Serve a single file
-./glow-web web README.md
+glow-web web README.md
 
 # Expose on the LAN
-./glow-web web . --addr :8080            # ":8080" = all interfaces
-./glow-web web . --addr 0.0.0.0:8080     # explicit form
+glow-web web . --addr :8080            # ":8080" = all interfaces
+glow-web web . --addr 0.0.0.0:8080     # explicit form
 
 # Reverse-proxy mount
-./glow-web web . --addr :8080 --url-prefix /docs
+glow-web web . --addr :8080 --url-prefix /docs
 
 # Render to HTML on stdout
-./glow-web render README.md --format html
+glow-web render README.md --format html
 
 # Hybrid markup view to stdout (markers visible, content styled)
-./glow-web render specs/spec.md --format markup
+glow-web render specs/spec.md --format markup
 
 # Extract a section by heading path
-./glow-web slice specs/spec.md --heading "Architecture"
+glow-web slice specs/spec.md --heading "Architecture"
 
 # Print version
-./glow-web version
+glow-web version
 ```
 
 ## Web flags
