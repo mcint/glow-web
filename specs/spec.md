@@ -136,6 +136,12 @@ root, so two glow-web instances on the same browser origin (same
 | `theme`                  | `light` / `dark` / `auto` — overrides `--theme` flag |
 | `palette-open`           | `1` / `0` — sidebar open state restored on each page |
 | `scroll:<pathname>`      | scroll position as fraction `0..1` per file          |
+| `index-sort`             | active column + direction (`"mtime:desc"`); `""` default |
+| `index-class`            | `md` / `text` / `all` — class cycle on index page    |
+| `index-hidden`           | `normal` / `hidden` / `ignored` — hidden cycle       |
+
+The index-page knobs are documented in detail in
+[`index-table-and-git.md`](index-table-and-git.md).
 
 The sidebar is left-anchored, slides in over the page, and shifts main
 content right via a body class. It opens on ⌘K / Ctrl-K, closes on Esc
