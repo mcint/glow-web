@@ -187,6 +187,20 @@ function K(suffix) { return KEY_PREFIX + suffix; }
       } catch (e) {}
     }
 
+    // Visible iff class+hidden body attrs admit this row. CSS does the
+    // actual hiding via display:none; we duplicate the logic in JS only
+    // to keep the count honest.
+    function passesToggle(tr) {
+      const cls = document.body.getAttribute('data-index-class')   || 'md';
+      const hid = document.body.getAttribute('data-index-hidden') || 'normal';
+      const c = tr.dataset.class || 'md';
+      if (cls === 'md'   && c !== 'md') return false;
+      if (cls === 'text' && c === 'other') return false;
+      if (hid === 'normal' && (tr.dataset.hidden || tr.dataset.ignored)) return false;
+      if (hid === 'hidden' && tr.dataset.ignored) return false;
+      return true;
+    }
+
     const rerender = () => {
       const q = indexFilter.value;
       let visible = 0;
@@ -208,10 +222,13 @@ function K(suffix) { return KEY_PREFIX + suffix; }
         const link = s.tr.querySelector('td.col-name a');
         if (link) link.innerHTML = renderSubPath(s.tr.dataset.rel, s.indices);
         indexTbody.appendChild(s.tr);
-        visible++;
+        if (passesToggle(s.tr)) visible++;
       }
       if (counter) counter.textContent = visible + ' files';
     };
+    // Expose so the cycle toggles can refresh the count without
+    // duplicating the count walk.
+    window.__indexRerender = rerender;
 
     sortHeaders.forEach(h => {
       h.addEventListener('click', () => {
@@ -240,6 +257,44 @@ function K(suffix) { return KEY_PREFIX + suffix; }
     // Apply restored sort on initial paint (server emitted default order).
     if (sortState.key && sortState.dir) rerender();
   }
+
+  // ---- class + hidden cycle toggles (index page) ----
+  // Each toggle is a 3-state cycle persisted in localStorage. CSS keys off
+  // body[data-index-class] / body[data-index-hidden] to hide rows; the JS
+  // just paints the button label and writes the body attr.
+  function wireCycle(btnId, attrName, storageKey, order, labels) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    const KEY = K(storageKey);
+    function get() {
+      try { return localStorage.getItem(KEY) || order[0]; }
+      catch (e) { return order[0]; }
+    }
+    function set(v) {
+      try {
+        if (v === order[0]) localStorage.removeItem(KEY);
+        else                localStorage.setItem(KEY, v);
+      } catch (e) {}
+      apply();
+    }
+    function apply() {
+      const v = get();
+      document.body.setAttribute(attrName, v);
+      btn.textContent = labels[v] || labels[order[0]];
+      if (typeof window.__indexRerender === 'function') window.__indexRerender();
+    }
+    btn.addEventListener('click', () => {
+      const cur = get();
+      set(order[(order.indexOf(cur) + 1) % order.length]);
+    });
+    apply();
+  }
+  wireCycle('class-toggle',  'data-index-class',  'index-class',
+            ['md', 'text', 'all'],
+            {md: '[md]', text: '[+text]', all: '[all]'});
+  wireCycle('hidden-toggle', 'data-index-hidden', 'index-hidden',
+            ['normal', 'hidden', 'ignored'],
+            {normal: '[normal]', hidden: '[+hidden]', ignored: '[+ignored]'});
 
   // ---- file palette as persistent left sidebar ----
   // Opens on ⌘K / Ctrl-K, sticks across page navigations via localStorage,

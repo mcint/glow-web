@@ -1,7 +1,9 @@
-// Package walk discovers markdown files under a root directory, applying
-// optional gitignore-style filtering. The output drives the web index and is
-// also the security boundary for serving file content: requests for files
-// not in the walk result are 404'd.
+// Package walk discovers files under a root directory, applying optional
+// gitignore-style filtering and class-based inclusion (markdown by default;
+// optionally text/config and everything else). The walk result drives the
+// web index AND is the security allowlist for serving content — callers
+// that opt in to non-md inclusion remain responsible for gating *serving*
+// on File.Class == "md" (the web server does this in findFile/serveOne).
 package walk
 
 import (
@@ -16,13 +18,16 @@ import (
 	ignore "github.com/sabhiram/go-gitignore"
 )
 
-// File describes one discovered markdown file.
+// File describes one discovered file.
 type File struct {
 	Abs     string    // absolute path on disk
 	Rel     string    // path relative to the walk root (forward slashes)
 	Name    string    // filepath.Base(Abs)
 	Size    int64     // byte size
 	ModTime time.Time // last modification time
+	Class   string    // "md" | "text" | "other" — see classify()
+	Hidden  bool      // any path segment starts with "."
+	Ignored bool      // matched a gitignore pattern but kept due to IncludeIgnored
 }
 
 // Options controls the walk.
@@ -31,8 +36,10 @@ type Options struct {
 	// stable Rel values across calls.
 	Root string
 
-	// Extensions is the case-insensitive set of file extensions to include
-	// (e.g. ".md", ".markdown"). When empty, defaults to {".md", ".markdown"}.
+	// Extensions is the case-insensitive set of file extensions counted
+	// as the "md" class (e.g. ".md", ".markdown"). When empty, defaults
+	// to {".md", ".markdown"}. Files with other extensions are classed
+	// as "text" or "other" via the built-in classifier.
 	Extensions []string
 
 	// Gitignore enables reading <Root>/.gitignore and implicitly excluding
@@ -47,11 +54,28 @@ type Options struct {
 	// ExtraLines is appended to the assembled ignore patterns. Use it to
 	// inject patterns programmatically without writing a file.
 	ExtraLines []string
+
+	// IncludeText keeps "text" class files in the result (configs, source,
+	// plain text). Class is set per the built-in classifier.
+	IncludeText bool
+
+	// IncludeAll keeps every classified file (including "other"). Implies
+	// IncludeText.
+	IncludeAll bool
+
+	// IncludeHidden keeps dotfiles and dot-directories. Does not affect
+	// the always-excluded .git directory.
+	IncludeHidden bool
+
+	// IncludeIgnored bypasses gitignore + IgnoreFiles + ExtraLines for
+	// inclusion. Matching entries are still tagged Ignored=true so the UI
+	// can mark them. .git/ remains excluded regardless.
+	IncludeIgnored bool
 }
 
-// Files walks Root and returns every markdown file that survives filtering,
-// sorted by Rel for stable output. Returned Rel paths use forward slashes
-// regardless of OS.
+// Files walks Root and returns every file matching the active class +
+// hidden + ignored filters, sorted by Rel for stable output. Returned Rel
+// paths use forward slashes regardless of OS.
 func Files(opts Options) ([]File, error) {
 	if opts.Root == "" {
 		return nil, errors.New("walk: Root is required")
@@ -88,18 +112,53 @@ func Files(opts Options) ([]File, error) {
 		}
 		slashRel := filepath.ToSlash(rel)
 
-		if d.IsDir() {
-			if ig != nil && (ig.MatchesPath(slashRel) || ig.MatchesPath(slashRel+"/")) {
+		// .git/ is always pruned regardless of other options — it's huge,
+		// noisy, and never useful to surface.
+		if d.IsDir() && (d.Name() == ".git") {
+			return fs.SkipDir
+		}
+
+		hidden := hasHiddenSegment(slashRel)
+		if hidden && !opts.IncludeHidden {
+			if d.IsDir() {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		if ig != nil && ig.MatchesPath(slashRel) {
+
+		var ignored bool
+		if ig != nil {
+			if d.IsDir() && (ig.MatchesPath(slashRel) || ig.MatchesPath(slashRel+"/")) {
+				if !opts.IncludeIgnored {
+					return fs.SkipDir
+				}
+				ignored = true
+			} else if !d.IsDir() && ig.MatchesPath(slashRel) {
+				if !opts.IncludeIgnored {
+					return nil
+				}
+				ignored = true
+			}
+		}
+
+		if d.IsDir() {
 			return nil
 		}
-		if !hasExt(d.Name(), exts) {
-			return nil
+
+		class := classify(d.Name(), exts)
+		switch class {
+		case "md":
+			// always kept (subject to hidden/ignored above)
+		case "text":
+			if !opts.IncludeText && !opts.IncludeAll {
+				return nil
+			}
+		default: // "other"
+			if !opts.IncludeAll {
+				return nil
+			}
 		}
+
 		info, err := d.Info()
 		if err != nil {
 			return err
@@ -110,6 +169,9 @@ func Files(opts Options) ([]File, error) {
 			Name:    d.Name(),
 			Size:    info.Size(),
 			ModTime: info.ModTime(),
+			Class:   class,
+			Hidden:  hidden,
+			Ignored: ignored,
 		})
 		return nil
 	})
@@ -129,8 +191,6 @@ func buildIgnore(root string, opts Options) (*ignore.GitIgnore, error) {
 		} else if !os.IsNotExist(err) {
 			return nil, err
 		}
-		// Always exclude the .git directory itself when gitignore is on.
-		lines = append(lines, ".git/", ".git")
 	}
 
 	for _, p := range opts.IgnoreFiles {
@@ -164,6 +224,61 @@ func hasExt(name string, lowerExts []string) bool {
 	n := strings.ToLower(name)
 	for _, e := range lowerExts {
 		if strings.HasSuffix(n, e) {
+			return true
+		}
+	}
+	return false
+}
+
+// textExtensions: the case-insensitive extension set we class as "text".
+// Keep deliberately broad but not unbounded — additions are cheap, but the
+// classifier should never make a network call or open the file.
+var textExtensions = map[string]struct{}{
+	".txt": {}, ".text": {},
+	".toml": {}, ".yaml": {}, ".yml": {}, ".json": {}, ".jsonc": {},
+	".xml": {}, ".html": {}, ".htm": {}, ".css": {}, ".scss": {},
+	".js": {}, ".ts": {}, ".jsx": {}, ".tsx": {}, ".mjs": {}, ".cjs": {},
+	".go": {}, ".rs": {}, ".py": {}, ".rb": {}, ".sh": {}, ".bash": {},
+	".zsh": {}, ".fish": {}, ".pl": {}, ".lua": {}, ".sql": {},
+	".c": {}, ".h": {}, ".cc": {}, ".cpp": {}, ".hpp": {}, ".java": {},
+	".kt": {}, ".swift": {}, ".m": {}, ".mm": {}, ".php": {},
+	".conf": {}, ".cfg": {}, ".ini": {}, ".env": {}, ".properties": {},
+	".csv": {}, ".tsv": {}, ".log": {}, ".diff": {}, ".patch": {},
+	".dockerfile": {}, ".gitignore": {}, ".gitattributes": {},
+	".editorconfig": {}, ".lock": {},
+}
+
+// textNames: extensionless filenames we class as "text" by convention.
+var textNames = map[string]struct{}{
+	"Makefile": {}, "Dockerfile": {}, "Rakefile": {}, "Gemfile": {},
+	"LICENSE": {}, "COPYING": {}, "NOTICE": {}, "README": {},
+	"CHANGELOG": {}, "AUTHORS": {}, "CONTRIBUTORS": {}, "TODO": {},
+	".gitignore": {}, ".gitattributes": {}, ".editorconfig": {},
+	".env": {}, ".dockerignore": {},
+}
+
+// classify returns the File.Class for a leaf filename. The mdExts argument
+// is the configured "md" set so callers can override the default.
+func classify(name string, mdExts []string) string {
+	if hasExt(name, mdExts) {
+		return "md"
+	}
+	if _, ok := textNames[name]; ok {
+		return "text"
+	}
+	ext := strings.ToLower(filepath.Ext(name))
+	if _, ok := textExtensions[ext]; ok {
+		return "text"
+	}
+	return "other"
+}
+
+// hasHiddenSegment reports whether any segment of a slash-separated path
+// begins with ".". A leaf dotfile counts; so does a file nested under a
+// dot-directory like ".github/workflows/ci.yml".
+func hasHiddenSegment(slashRel string) bool {
+	for _, seg := range strings.Split(slashRel, "/") {
+		if seg != "" && seg[0] == '.' {
 			return true
 		}
 	}

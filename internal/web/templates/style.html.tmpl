@@ -106,6 +106,20 @@ table.files td.col-size, table.files td.col-mtime {
   color: var(--muted); font-size: .85em;
 }
 table.files td.empty { color: var(--muted); padding: 1rem .5rem; text-align: left; }
+table.files td.col-name .no-link { color: var(--muted); }
+
+/* Row visibility driven by two body data-attrs the cycle buttons set.
+   Class cycle: "md" hides text+other; "text" hides other; "all" shows all.
+   Hidden cycle: "normal" hides dotfiles + ignored; "hidden" exposes
+   dotfiles but still hides ignored; "ignored" exposes both. */
+body[data-index-class="md"]   table.files tr[data-class="text"],
+body[data-index-class="md"]   table.files tr[data-class="other"],
+body[data-index-class="text"] table.files tr[data-class="other"] { display: none; }
+body[data-index-hidden="normal"] table.files tr[data-hidden="1"],
+body[data-index-hidden="normal"] table.files tr[data-ignored="1"],
+body[data-index-hidden="hidden"] table.files tr[data-ignored="1"] { display: none; }
+table.files tr[data-ignored="1"] td { opacity: .55; font-style: italic; }
+table.files tr[data-hidden="1"]:not([data-ignored="1"]) td.col-name { color: var(--muted); }
 footer {
   border-top: 1px solid var(--border); padding: .75rem 1rem;
   color: var(--muted); font-size: .8em;

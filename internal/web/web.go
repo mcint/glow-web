@@ -526,6 +526,9 @@ func (s *Server) linkResolver(currentRel string) func(string) (string, bool) {
 	}
 	allowed := make(map[string]struct{}, len(files))
 	for _, f := range files {
+		if f.Class != "md" {
+			continue
+		}
 		allowed[f.Rel] = struct{}{}
 	}
 	return func(href string) (string, bool) {
@@ -618,27 +621,62 @@ func (s *Server) viewIsMarkup(q string) bool {
 }
 
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
-	files, err := walk.Files(s.Walk)
+	// Widen the walk for the index view: include text, "other", hidden,
+	// and gitignored files so the client-side toggles have every row to
+	// show or hide. The serving allowlist (findFile + link rewriting)
+	// keeps requiring Class == "md", so widening here does not relax
+	// what we actually serve.
+	indexOpts := s.Walk
+	indexOpts.IncludeText = true
+	indexOpts.IncludeAll = true
+	indexOpts.IncludeHidden = true
+	indexOpts.IncludeIgnored = true
+	files, err := walk.Files(indexOpts)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Second walk with the user's actual options: this is the set whose
+	// rows get a clickable link. Anything in the wide walk but not the
+	// narrow walk is listing-only (no <a>), regardless of its class.
+	narrow, err := walk.Files(s.Walk)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	servable := make(map[string]struct{}, len(narrow))
+	for _, f := range narrow {
+		if f.Class == "md" {
+			servable[f.Rel] = struct{}{}
+		}
+	}
 	prefixFilter := normalizePrefixFilter(r.URL.Query().Get("prefix"))
 
 	items := make([]indexItem, 0, len(files))
+	visible := 0 // count of rows the default toggle state (md/normal) will show
 	for _, f := range files {
 		if prefixFilter != "" && !strings.HasPrefix(f.Rel, prefixFilter) {
 			continue
+		}
+		url := ""
+		if _, ok := servable[f.Rel]; ok {
+			url = s.urlFor(f.Rel)
 		}
 		items = append(items, indexItem{
 			Rel:      f.Rel,
 			Display:  strings.TrimPrefix(f.Rel, prefixFilter),
 			Name:     f.Name,
-			URL:      s.urlFor(f.Rel),
+			URL:      url,
 			Size:     f.Size,
 			Mtime:    f.ModTime.Unix(),
 			MtimeRel: relTimeShort(time.Since(f.ModTime)),
+			Class:    f.Class,
+			Hidden:   f.Hidden,
+			Ignored:  f.Ignored,
 		})
+		if f.Class == "md" && !f.Hidden && !f.Ignored {
+			visible++
+		}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data := indexData{
@@ -647,7 +685,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		Crumbs:      s.crumbsForIndex(prefixFilter),
 		Filter:      prefixFilter,
 		Files:       items,
-		Count:       len(items),
+		Count:       visible,
 		FilesURL:    s.utilityURL("/_/files"),
 		Palette:     s.CommandPalette,
 		ServerTheme: s.serverTheme(),
@@ -807,14 +845,17 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 }
 
 // findFile gates serving on the walk result. It rejects path-traversal
-// attempts even before consulting the list.
+// attempts before consulting the list and refuses anything whose Class
+// isn't "md" — defense-in-depth so widening Walk options elsewhere can
+// never accidentally make non-markdown files servable. Raw-text serving
+// for "text" class files is a future feature with its own gate.
 func findFile(files []walk.File, rel string) *walk.File {
 	clean := path.Clean(rel)
 	if clean == "." || strings.HasPrefix(clean, "..") || strings.HasPrefix(clean, "/") {
 		return nil
 	}
 	for i := range files {
-		if files[i].Rel == clean {
+		if files[i].Rel == clean && files[i].Class == "md" {
 			return &files[i]
 		}
 	}
@@ -854,10 +895,13 @@ type indexItem struct {
 	Rel      string
 	Display  string // path with current prefix-filter trimmed off
 	Name     string
-	URL      string
+	URL      string // empty when Class != "md" — template renders plain text instead of <a>
 	Size     int64
 	Mtime    int64  // Unix seconds, surfaced as data-mtime on the row for client-side sort/filter
 	MtimeRel string // compact relative form ("5m", "3d", …) for initial paint; JS recomputes on filter
+	Class    string // "md" | "text" | "other" — drives data-class for the class-cycle toggle
+	Hidden   bool   // dotfile or under a dot-dir; drives data-hidden for the hidden-cycle toggle
+	Ignored  bool   // matched gitignore but kept due to IncludeIgnored; UI dims the row
 }
 
 type indexData struct {

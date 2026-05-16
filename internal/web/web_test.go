@@ -96,15 +96,17 @@ func TestDirMode_IndexListsDiscoveredFiles(t *testing.T) {
 		`href="/alpha.md"`,
 		`href="/sub/beta.md"`,
 		`data-rel="alpha.md"`,
-		"2 files",
+		"2 files", // count reflects the default-visible set (md, not hidden, not ignored)
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("index missing %q", want)
 		}
 	}
-	for _, unwanted := range []string{"secret.md", "ignore-me.txt"} {
-		if strings.Contains(body, unwanted) {
-			t.Errorf("index leaked filtered file %q", unwanted)
+	// Non-md / ignored entries appear as listing-only rows (hidden by CSS in
+	// default toggle state) but must never carry a servable link.
+	for _, leak := range []string{`href="/secret.md"`, `href="/ignore-me.txt"`} {
+		if strings.Contains(body, leak) {
+			t.Errorf("index leaked link for non-served file: %q", leak)
 		}
 	}
 }
@@ -361,6 +363,55 @@ func TestIndexRow_HasMtimeAndSizeAttributes(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("index missing %q", want)
 		}
+	}
+}
+
+func TestIndex_CycleTogglesPresent(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/", "")
+	body := rec.Body.String()
+	for _, want := range []string{
+		`id="class-toggle"`,
+		`id="hidden-toggle"`,
+		`data-index-class="md"`,
+		`data-index-hidden="normal"`,
+		`'index-class'`,
+		`'index-hidden'`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index page missing %q", want)
+		}
+	}
+}
+
+func TestIndex_NonMdRowsListingOnly(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/", "")
+	body := rec.Body.String()
+	// ignore-me.txt is text-class — listed (so client toggles can reveal it)
+	// but not linked.
+	if !strings.Contains(body, `data-rel="ignore-me.txt"`) {
+		t.Errorf("index should list ignore-me.txt as a non-link row")
+	}
+	if !strings.Contains(body, `data-class="text"`) {
+		t.Errorf("ignore-me.txt should carry data-class=\"text\"")
+	}
+	if strings.Contains(body, `href="/ignore-me.txt"`) {
+		t.Errorf("non-md file must not be served as a link")
+	}
+	// And the no-link span styling identifies it as listing-only.
+	if !strings.Contains(body, `class="no-link"`) {
+		t.Errorf("non-md row should render with no-link span")
+	}
+}
+
+func TestDirMode_NonMdReturns404(t *testing.T) {
+	_, s := dirFixture(t)
+	// ignore-me.txt is in the widened walk for indexing but Class != "md",
+	// so findFile must refuse to serve it.
+	rec := serve(s.Handler(), "GET", "/ignore-me.txt", "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("non-md serve should 404, got %d", rec.Code)
 	}
 }
 

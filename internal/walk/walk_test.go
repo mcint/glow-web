@@ -103,6 +103,126 @@ func TestFiles_CustomExtensions(t *testing.T) {
 	}
 }
 
+// --- classification + include-toggles ---
+
+func TestFiles_ClassDefaultsToMdOnly(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "doc.md"), "x")
+	mustWrite(t, filepath.Join(dir, "conf.toml"), "x")
+	mustWrite(t, filepath.Join(dir, "blob.bin"), "x")
+
+	files, _ := walk.Files(walk.Options{Root: dir})
+	if got := relPaths(files); !equal(got, []string{"doc.md"}) {
+		t.Errorf("default class filter should keep only md, got %v", got)
+	}
+	if files[0].Class != "md" {
+		t.Errorf("doc.md Class = %q, want md", files[0].Class)
+	}
+}
+
+func TestFiles_IncludeTextAddsTextClass(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "doc.md"), "x")
+	mustWrite(t, filepath.Join(dir, "conf.toml"), "x")
+	mustWrite(t, filepath.Join(dir, "Makefile"), "x")
+	mustWrite(t, filepath.Join(dir, "blob.bin"), "x")
+
+	files, _ := walk.Files(walk.Options{Root: dir, IncludeText: true})
+	got := relPaths(files)
+	want := []string{"Makefile", "conf.toml", "doc.md"}
+	if !equal(got, want) {
+		t.Errorf("IncludeText: got %v want %v", got, want)
+	}
+	classes := map[string]string{}
+	for _, f := range files {
+		classes[f.Rel] = f.Class
+	}
+	if classes["doc.md"] != "md" || classes["conf.toml"] != "text" || classes["Makefile"] != "text" {
+		t.Errorf("unexpected classes: %v", classes)
+	}
+}
+
+func TestFiles_IncludeAllAddsOtherClass(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "doc.md"), "x")
+	mustWrite(t, filepath.Join(dir, "blob.bin"), "x")
+
+	files, _ := walk.Files(walk.Options{Root: dir, IncludeAll: true})
+	if got := relPaths(files); !equal(got, []string{"blob.bin", "doc.md"}) {
+		t.Errorf("IncludeAll: got %v", got)
+	}
+	for _, f := range files {
+		if f.Rel == "blob.bin" && f.Class != "other" {
+			t.Errorf("blob.bin Class = %q, want other", f.Class)
+		}
+	}
+}
+
+func TestFiles_HiddenExcludedByDefault(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "visible.md"), "x")
+	mustWrite(t, filepath.Join(dir, ".hidden.md"), "x")
+	mustMkdir(t, filepath.Join(dir, ".dotdir"))
+	mustWrite(t, filepath.Join(dir, ".dotdir", "buried.md"), "x")
+
+	files, _ := walk.Files(walk.Options{Root: dir})
+	if got := relPaths(files); !equal(got, []string{"visible.md"}) {
+		t.Errorf("default should hide dotfiles + dot-dirs, got %v", got)
+	}
+}
+
+func TestFiles_IncludeHiddenExposesDotfiles(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "visible.md"), "x")
+	mustWrite(t, filepath.Join(dir, ".hidden.md"), "x")
+	mustMkdir(t, filepath.Join(dir, ".dotdir"))
+	mustWrite(t, filepath.Join(dir, ".dotdir", "buried.md"), "x")
+
+	files, _ := walk.Files(walk.Options{Root: dir, IncludeHidden: true})
+	got := relPaths(files)
+	want := []string{".dotdir/buried.md", ".hidden.md", "visible.md"}
+	if !equal(got, want) {
+		t.Errorf("IncludeHidden: got %v want %v", got, want)
+	}
+	for _, f := range files {
+		expectHidden := f.Rel != "visible.md"
+		if f.Hidden != expectHidden {
+			t.Errorf("%s Hidden = %v, want %v", f.Rel, f.Hidden, expectHidden)
+		}
+	}
+}
+
+func TestFiles_IncludeHiddenStillSkipsDotGit(t *testing.T) {
+	dir := t.TempDir()
+	mustMkdir(t, filepath.Join(dir, ".git", "objects"))
+	mustWrite(t, filepath.Join(dir, ".git", "leak.md"), "x")
+	mustWrite(t, filepath.Join(dir, "ok.md"), "x")
+
+	files, _ := walk.Files(walk.Options{Root: dir, IncludeHidden: true, Gitignore: false})
+	if got := relPaths(files); !equal(got, []string{"ok.md"}) {
+		t.Errorf(".git must always be pruned, got %v", got)
+	}
+}
+
+func TestFiles_IncludeIgnoredKeepsAndTagsRows(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, ".gitignore"), "private.md\n")
+	mustWrite(t, filepath.Join(dir, "public.md"), "x")
+	mustWrite(t, filepath.Join(dir, "private.md"), "x")
+
+	files, _ := walk.Files(walk.Options{Root: dir, Gitignore: true, IncludeIgnored: true})
+	if got := relPaths(files); !equal(got, []string{"private.md", "public.md"}) {
+		t.Errorf("IncludeIgnored: got %v", got)
+	}
+	tags := map[string]bool{}
+	for _, f := range files {
+		tags[f.Rel] = f.Ignored
+	}
+	if !tags["private.md"] || tags["public.md"] {
+		t.Errorf("Ignored tagging wrong: %v", tags)
+	}
+}
+
 // helpers
 
 func mustWrite(t *testing.T, path, content string) {
