@@ -144,42 +144,101 @@ function K(suffix) { return KEY_PREFIX + suffix; }
     return Math.round(ageS/(86400*365)) + 'y';
   }
 
-  // ---- index page inline filter (data already in DOM) ----
+  // ---- index page: inline filter + column sort (both client-side) ----
+  // The table is server-emitted in default order (by Rel). The filter
+  // sorts by fuzzy score when active; when the filter is empty, the
+  // last user-chosen sort (or default) decides row order. State for
+  // the sort persists in localStorage as "<key>:<dir>".
   const indexFilter = document.getElementById('index-filter');
-  const indexList = document.querySelector('ul.files');
-  if (indexFilter && indexList) {
-    const items = Array.from(indexList.querySelectorAll('li[data-rel]'));
+  const indexTbody = document.querySelector('table.files tbody');
+  const sortHeaders = document.querySelectorAll('table.files thead th[data-sort-key]');
+  if (indexFilter && indexTbody) {
+    const items = Array.from(indexTbody.querySelectorAll('tr[data-rel]'));
     const counter = document.getElementById('count');
+    const SORT_KEY = K('index-sort');
+    let sortState = { key: '', dir: '' };
+    try {
+      const raw = localStorage.getItem(SORT_KEY) || '';
+      const i = raw.indexOf(':');
+      if (i > 0) sortState = { key: raw.slice(0, i), dir: raw.slice(i + 1) };
+    } catch (e) {}
+
+    function rowCmp(key, dir) {
+      const m = dir === 'desc' ? -1 : 1;
+      return (a, b) => {
+        if (key === 'size')  return m * (parseInt(a.dataset.size  || '0', 10) - parseInt(b.dataset.size  || '0', 10));
+        if (key === 'mtime') return m * (parseInt(a.dataset.mtime || '0', 10) - parseInt(b.dataset.mtime || '0', 10));
+        return m * a.dataset.rel.localeCompare(b.dataset.rel);
+      };
+    }
+    function paintSortHeaders() {
+      sortHeaders.forEach(h => {
+        if (h.dataset.sortKey === sortState.key && sortState.dir) {
+          h.setAttribute('data-sort-dir', sortState.dir);
+        } else {
+          h.removeAttribute('data-sort-dir');
+        }
+      });
+    }
+    function persistSort() {
+      try {
+        if (sortState.key && sortState.dir) localStorage.setItem(SORT_KEY, sortState.key + ':' + sortState.dir);
+        else                                localStorage.removeItem(SORT_KEY);
+      } catch (e) {}
+    }
+
     const rerender = () => {
       const q = indexFilter.value;
       let visible = 0;
-      const scored = items.map(li => ({ li, ...fuzzyMatch(q, li.dataset.rel) }));
-      scored.sort((a, b) => (a.match === b.match) ? a.score - b.score : (a.match ? -1 : 1));
-      indexList.innerHTML = '';
-      for (const s of scored) {
-        if (!s.match) { s.li.style.display = 'none'; continue; }
-        s.li.style.display = '';
-        const link = s.li.querySelector('a');
-        if (link) link.innerHTML = renderSubPath(s.li.dataset.rel, s.indices);
-        // Replace the byte-size hint with relative-time when filtering.
-        const meta = s.li.querySelector('.size');
-        const t = relTime(parseInt(s.li.dataset.mtime || '0', 10));
-        if (meta && t) meta.textContent = t;
-        indexList.appendChild(s.li);
+      let ordered;
+      if (q.trim()) {
+        // Filter active: rank by fuzzy score, descending match-first.
+        const scored = items.map(tr => ({ tr, ...fuzzyMatch(q, tr.dataset.rel) }));
+        scored.sort((a, b) => (a.match === b.match) ? a.score - b.score : (a.match ? -1 : 1));
+        ordered = scored;
+      } else {
+        // No filter: respect sort state (or default by Rel).
+        const cmp = rowCmp(sortState.key || 'name', sortState.dir || 'asc');
+        ordered = items.slice().sort((a, b) => cmp(a, b)).map(tr => ({ tr, match: true, indices: [] }));
+      }
+      indexTbody.innerHTML = '';
+      for (const s of ordered) {
+        if (!s.match) { s.tr.style.display = 'none'; continue; }
+        s.tr.style.display = '';
+        const link = s.tr.querySelector('td.col-name a');
+        if (link) link.innerHTML = renderSubPath(s.tr.dataset.rel, s.indices);
+        indexTbody.appendChild(s.tr);
         visible++;
       }
       if (counter) counter.textContent = visible + ' files';
     };
+
+    sortHeaders.forEach(h => {
+      h.addEventListener('click', () => {
+        const k = h.dataset.sortKey;
+        if (sortState.key !== k)        sortState = { key: k, dir: 'asc'  };
+        else if (sortState.dir === 'asc')  sortState = { key: k, dir: 'desc' };
+        else                                sortState = { key: '', dir: ''   };
+        paintSortHeaders();
+        persistSort();
+        rerender();
+      });
+    });
+
     indexFilter.addEventListener('input', rerender);
     indexFilter.addEventListener('keydown', e => {
       if (e.key === 'Enter') {
-        const first = indexList.querySelector('li[data-rel] a');
+        const first = indexTbody.querySelector('tr[data-rel] td.col-name a');
         if (first) { e.preventDefault(); location.href = first.href; }
       } else if (e.key === 'Escape') {
         indexFilter.value = '';
         rerender();
       }
     });
+
+    paintSortHeaders();
+    // Apply restored sort on initial paint (server emitted default order).
+    if (sortState.key && sortState.dir) rerender();
   }
 
   // ---- file palette as persistent left sidebar ----

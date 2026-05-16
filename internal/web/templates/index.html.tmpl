@@ -18,16 +18,26 @@
   </nav>
 </header>
 <main>
-<ul class="files">
-  {{range .Files}}
-  <li data-rel="{{.Rel}}" data-mtime="{{.Mtime}}">
-    <a href="{{.URL}}">{{.Display}}</a>
-    <span class="size">{{.Size}} B</span>
-  </li>
-  {{else}}
-  <li>(no markdown files found)</li>
-  {{end}}
-</ul>
+<table class="files">
+  <thead>
+    <tr>
+      <th class="col-name"  data-sort-key="name">name</th>
+      <th class="col-size"  data-sort-key="size">size</th>
+      <th class="col-mtime" data-sort-key="mtime">mtime</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Files}}
+    <tr data-rel="{{.Rel}}" data-mtime="{{.Mtime}}" data-size="{{.Size}}">
+      <td class="col-name"><a href="{{.URL}}">{{.Display}}</a></td>
+      <td class="col-size">{{.Size}}</td>
+      <td class="col-mtime">{{.MtimeRel}}</td>
+    </tr>
+    {{else}}
+    <tr><td colspan="3" class="empty">(no markdown files found)</td></tr>
+    {{end}}
+  </tbody>
+</table>
 </main>
 {{template "footer" .}}
 {{template "scripts" .}}

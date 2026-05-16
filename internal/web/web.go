@@ -18,6 +18,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/mcint/glow-web/internal/render"
 	"github.com/mcint/glow-web/internal/version"
@@ -630,12 +631,13 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		items = append(items, indexItem{
-			Rel:     f.Rel,
-			Display: strings.TrimPrefix(f.Rel, prefixFilter),
-			Name:    f.Name,
-			URL:     s.urlFor(f.Rel),
-			Size:    f.Size,
-			Mtime:   f.ModTime.Unix(),
+			Rel:      f.Rel,
+			Display:  strings.TrimPrefix(f.Rel, prefixFilter),
+			Name:     f.Name,
+			URL:      s.urlFor(f.Rel),
+			Size:     f.Size,
+			Mtime:    f.ModTime.Unix(),
+			MtimeRel: relTimeShort(time.Since(f.ModTime)),
 		})
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -655,6 +657,32 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := pageTmpl.ExecuteTemplate(w, "index.html.tmpl", data); err != nil {
 		fmt.Fprintf(os.Stderr, "glow-web: index template: %v\n", err)
+	}
+}
+
+// relTimeShort renders a duration in the compact "5m" / "3h" / "2d" form
+// the index/palette JS uses, so the server-rendered initial paint matches
+// what the client would compute on its own.
+func relTimeShort(d time.Duration) string {
+	s := d.Seconds()
+	if s < 0 {
+		s = 0
+	}
+	switch {
+	case s < 45:
+		return "now"
+	case s < 3600:
+		return fmt.Sprintf("%dm", int(s/60+0.5))
+	case s < 86400:
+		return fmt.Sprintf("%dh", int(s/3600+0.5))
+	case s < 86400*7:
+		return fmt.Sprintf("%dd", int(s/86400+0.5))
+	case s < 86400*30:
+		return fmt.Sprintf("%dw", int(s/(86400*7)+0.5))
+	case s < 86400*365:
+		return fmt.Sprintf("%dmo", int(s/(86400*30)+0.5))
+	default:
+		return fmt.Sprintf("%dy", int(s/(86400*365)+0.5))
 	}
 }
 
@@ -823,12 +851,13 @@ type pageData struct {
 }
 
 type indexItem struct {
-	Rel     string
-	Display string // path with current prefix-filter trimmed off
-	Name    string
-	URL     string
-	Size    int64
-	Mtime   int64 // Unix seconds, surfaced as data-mtime on the li for the inline filter
+	Rel      string
+	Display  string // path with current prefix-filter trimmed off
+	Name     string
+	URL      string
+	Size     int64
+	Mtime    int64  // Unix seconds, surfaced as data-mtime on the row for client-side sort/filter
+	MtimeRel string // compact relative form ("5m", "3d", …) for initial paint; JS recomputes on filter
 }
 
 type indexData struct {

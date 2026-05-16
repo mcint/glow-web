@@ -346,12 +346,21 @@ func TestFilesEndpoint_DirMode(t *testing.T) {
 	}
 }
 
-func TestIndexLi_HasMtimeAttribute(t *testing.T) {
+func TestIndexRow_HasMtimeAndSizeAttributes(t *testing.T) {
 	_, s := dirFixture(t)
 	rec := serve(s.Handler(), "GET", "/", "")
 	body := rec.Body.String()
-	if !strings.Contains(body, `data-mtime="`) {
-		t.Errorf("index <li> missing data-mtime attribute")
+	for _, want := range []string{
+		`<table class="files">`,
+		`data-mtime="`,
+		`data-size="`,
+		`data-sort-key="name"`,
+		`data-sort-key="size"`,
+		`data-sort-key="mtime"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index missing %q", want)
+		}
 	}
 }
 
