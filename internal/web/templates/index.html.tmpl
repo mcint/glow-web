@@ -23,21 +23,26 @@
 <table class="files">
   <thead>
     <tr>
-      <th class="col-name"  data-sort-key="name">name</th>
-      <th class="col-size"  data-sort-key="size">size</th>
-      <th class="col-mtime" data-sort-key="mtime">mtime</th>
+      <th class="col-name"    data-sort-key="name">name</th>
+      <th class="col-size"    data-sort-key="size">size</th>
+      <th class="col-mtime"   data-sort-key="mtime">mtime</th>
+      <th class="col-git-xy"  data-sort-key="xy" title="git status (porcelain XY)">git</th>
+      <th class="col-git-num" data-sort-key="diff" title="git diff vs HEAD (additions / deletions)">±</th>
     </tr>
   </thead>
   <tbody>
     {{range .Files}}
     <tr data-rel="{{.Rel}}" data-mtime="{{.Mtime}}" data-size="{{.Size}}"
-        data-class="{{.Class}}"{{if .Hidden}} data-hidden="1"{{end}}{{if .Ignored}} data-ignored="1"{{end}}>
+        data-class="{{.Class}}"{{if .Hidden}} data-hidden="1"{{end}}{{if .Ignored}} data-ignored="1"{{end}}
+        data-xy="{{.GitXY}}" data-adds="{{.GitAdds}}" data-dels="{{.GitDels}}">
       <td class="col-name">{{if .URL}}<a href="{{.URL}}">{{.Display}}</a>{{else}}<span class="no-link">{{.Display}}</span>{{end}}</td>
       <td class="col-size">{{.Size}}</td>
       <td class="col-mtime">{{.MtimeRel}}</td>
+      <td class="col-git-xy">{{.GitXY}}</td>
+      <td class="col-git-num">{{if .GitAdds}}<span class="git-add">+{{.GitAdds}}</span>{{end}}{{if .GitDels}} <span class="git-del">-{{.GitDels}}</span>{{end}}</td>
     </tr>
     {{else}}
-    <tr><td colspan="3" class="empty">(no markdown files found)</td></tr>
+    <tr><td colspan="5" class="empty">(no markdown files found)</td></tr>
     {{end}}
   </tbody>
 </table>

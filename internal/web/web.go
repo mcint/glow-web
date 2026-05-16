@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mcint/glow-web/internal/gitstatus"
 	"github.com/mcint/glow-web/internal/render"
 	"github.com/mcint/glow-web/internal/version"
 	"github.com/mcint/glow-web/internal/walk"
@@ -650,6 +651,9 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 			servable[f.Rel] = struct{}{}
 		}
 	}
+	// gitstatus is best-effort: missing repo, missing `git`, or a timeout
+	// all yield an empty map, and the columns just render blank.
+	gits, _ := gitstatus.Status(s.Root)
 	prefixFilter := normalizePrefixFilter(r.URL.Query().Get("prefix"))
 
 	items := make([]indexItem, 0, len(files))
@@ -662,6 +666,13 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		if _, ok := servable[f.Rel]; ok {
 			url = s.urlFor(f.Rel)
 		}
+		var xy string
+		var adds, dels int
+		if g, ok := gits[f.Rel]; ok {
+			xy = g.XY()
+			adds = g.Adds
+			dels = g.Dels
+		}
 		items = append(items, indexItem{
 			Rel:      f.Rel,
 			Display:  strings.TrimPrefix(f.Rel, prefixFilter),
@@ -673,6 +684,9 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 			Class:    f.Class,
 			Hidden:   f.Hidden,
 			Ignored:  f.Ignored,
+			GitXY:    xy,
+			GitAdds:  adds,
+			GitDels:  dels,
 		})
 		if f.Class == "md" && !f.Hidden && !f.Ignored {
 			visible++
@@ -902,6 +916,9 @@ type indexItem struct {
 	Class    string // "md" | "text" | "other" — drives data-class for the class-cycle toggle
 	Hidden   bool   // dotfile or under a dot-dir; drives data-hidden for the hidden-cycle toggle
 	Ignored  bool   // matched gitignore but kept due to IncludeIgnored; UI dims the row
+	GitXY    string // two-char porcelain status ("M ", " M", "??", …); empty when clean / no repo
+	GitAdds  int    // numstat additions vs HEAD; 0 when clean / not in repo / binary
+	GitDels  int    // numstat deletions vs HEAD
 }
 
 type indexData struct {

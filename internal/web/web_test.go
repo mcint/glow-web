@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -412,6 +413,61 @@ func TestDirMode_NonMdReturns404(t *testing.T) {
 	rec := serve(s.Handler(), "GET", "/ignore-me.txt", "")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("non-md serve should 404, got %d", rec.Code)
+	}
+}
+
+func TestIndex_GitStatusColumnsPopulated(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a.md"), "one\ntwo\nthree\n")
+	mustWrite(t, filepath.Join(dir, "b.md"), "seed\n")
+	runGit(t, dir, "init", "-q")
+	runGit(t, dir, "config", "user.email", "test@example.com")
+	runGit(t, dir, "config", "user.name", "Test")
+	runGit(t, dir, "config", "commit.gpgsign", "false")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-q", "-m", "init")
+	// Modify a.md to give it a visible status.
+	mustWrite(t, filepath.Join(dir, "a.md"), "one\ntwo\nthree\nfour\nfive\n")
+
+	s, err := web.NewServer(dir, walk.Options{Gitignore: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := serve(s.Handler(), "GET", "/", "")
+	body := rec.Body.String()
+	// a.md modified in worktree: XY = " M", numstat = +2 -0.
+	if !strings.Contains(body, `data-xy=" M"`) {
+		t.Errorf("a.md row should have data-xy=\" M\" in:\n%s", body)
+	}
+	if !strings.Contains(body, `data-adds="2"`) {
+		t.Errorf("a.md row should have data-adds=\"2\"")
+	}
+	if !strings.Contains(body, `>+2</span>`) {
+		t.Errorf("a.md row should render +2 in the diff column")
+	}
+}
+
+func TestIndex_GitColumnsBlankWhenNoRepo(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/", "")
+	body := rec.Body.String()
+	// dirFixture has no .git, so XY data-attrs should be empty strings.
+	if !strings.Contains(body, `data-xy=""`) {
+		t.Errorf("non-git fixture should emit empty data-xy attr")
+	}
+	if strings.Contains(body, `<td class="col-git-num"><span class="git-add">`) {
+		t.Errorf("non-git fixture must not render any +N adds: %s", body)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
 

@@ -165,9 +165,13 @@ function K(suffix) { return KEY_PREFIX + suffix; }
 
     function rowCmp(key, dir) {
       const m = dir === 'desc' ? -1 : 1;
+      const totalDiff = (tr) =>
+        parseInt(tr.dataset.adds || '0', 10) + parseInt(tr.dataset.dels || '0', 10);
       return (a, b) => {
         if (key === 'size')  return m * (parseInt(a.dataset.size  || '0', 10) - parseInt(b.dataset.size  || '0', 10));
         if (key === 'mtime') return m * (parseInt(a.dataset.mtime || '0', 10) - parseInt(b.dataset.mtime || '0', 10));
+        if (key === 'xy')    return m * (a.dataset.xy || '').localeCompare(b.dataset.xy || '');
+        if (key === 'diff')  return m * (totalDiff(a) - totalDiff(b));
         return m * a.dataset.rel.localeCompare(b.dataset.rel);
       };
     }

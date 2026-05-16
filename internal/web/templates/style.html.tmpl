@@ -99,12 +99,23 @@ table.files td {
 table.files td.col-name a { text-decoration: none; }
 table.files td.col-name a:hover { text-decoration: underline; }
 table.files th.col-size, table.files th.col-mtime,
-table.files td.col-size, table.files td.col-mtime {
+table.files td.col-size, table.files td.col-mtime,
+table.files th.col-git-xy, table.files th.col-git-num,
+table.files td.col-git-xy, table.files td.col-git-num {
   text-align: right; white-space: nowrap;
 }
 table.files td.col-size, table.files td.col-mtime {
   color: var(--muted); font-size: .85em;
 }
+table.files td.col-git-xy {
+  color: var(--muted); font-size: .85em;
+  white-space: pre; /* preserve leading/embedded spaces in "M " or " M" */
+}
+table.files td.col-git-num { font-size: .85em; }
+table.files .git-add { color: #15803d; }
+table.files .git-del { color: #b91c1c; }
+:root[data-theme="dark"] table.files .git-add { color: #4ade80; }
+:root[data-theme="dark"] table.files .git-del { color: #f87171; }
 table.files td.empty { color: var(--muted); padding: 1rem .5rem; text-align: left; }
 table.files td.col-name .no-link { color: var(--muted); }
 
