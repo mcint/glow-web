@@ -11,6 +11,30 @@ While we're pre-1.0, minors are allowed to break things; patches will not.
 
 ### Added
 
+- Index page is now a sortable table with five columns: name, size,
+  mtime, git status (porcelain XY), and a ±N numstat for the diff
+  vs HEAD. Click any column header to cycle sort asc → desc →
+  default; sort state persists per-project in `localStorage`.
+  Spec: `specs/index-table-and-git.md`.
+- Class-cycle toggle on the index — `[md]` → `[+text]` → `[all]` —
+  to widen the listing from markdown to common text/config files
+  to everything. Non-md rows render as listing-only (no link); the
+  serving allowlist remains markdown-only. Persisted in
+  `localStorage` under `index-class`.
+- Hidden-cycle toggle on the index — `[normal]` → `[+hidden]` →
+  `[+ignored]` — to expose dotfiles and gitignored files.
+  Orthogonal to the class toggle; persisted under `index-hidden`.
+- Per-row git status when the served directory is a git repo:
+  shells once to `git status --porcelain=v1 -z` and once to
+  `git diff HEAD --numstat -z`. Missing `.git` or missing `git`
+  binary silently leaves the columns blank.
+- New `internal/gitstatus` package wraps the git invocations with
+  a 2s timeout and returns a `map[string]Entry` keyed by repo-
+  relative path.
+- `walk.Options` gains `IncludeText`, `IncludeAll`, `IncludeHidden`,
+  and `IncludeIgnored`. `walk.File` gains `Class` (`md` / `text` /
+  `other`), `Hidden`, and `Ignored` fields. `.git/` is always
+  pruned regardless of options.
 - `/_/files` JSON entries now carry `mtime` (Unix seconds). Index
   page `<li>` elements get `data-mtime` for the same reason.
 - Filter rendering shows a relative-time hint (`5m` / `3h` / `2d` /
