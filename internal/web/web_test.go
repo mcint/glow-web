@@ -920,6 +920,41 @@ func TestURLPrefix_RoutesUnderMount(t *testing.T) {
 	}
 }
 
+// --- parent-hint above breadcrumb ---
+
+func TestParentHint_IndexShowsParent(t *testing.T) {
+	dir, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/", "")
+	body := rec.Body.String()
+	want := `<div class="parent-hint" aria-label="serving root context">` + filepath.Dir(dir) + `/</div>`
+	if !strings.Contains(body, want) {
+		t.Errorf("index missing parent-hint %q", want)
+	}
+}
+
+func TestParentHint_FileViewIncludesIt(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	body := rec.Body.String()
+	if !strings.Contains(body, `class="parent-hint"`) {
+		t.Errorf("file view should include parent-hint div")
+	}
+}
+
+func TestParentHint_RootSlashHidden(t *testing.T) {
+	// A server rooted at "/" has no parent; the helper returns "" and the
+	// template omits the div entirely.
+	s, err := web.NewServer("/", walk.Options{Gitignore: true})
+	if err != nil {
+		t.Skipf("cannot serve /: %v", err)
+	}
+	rec := serve(s.Handler(), "GET", "/", "")
+	body := rec.Body.String()
+	if strings.Contains(body, `class="parent-hint"`) {
+		t.Errorf("root=/ should not render parent-hint div")
+	}
+}
+
 // --- helpers ---
 
 func serve(h interface {

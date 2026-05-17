@@ -1,4 +1,5 @@
 {{define "crumbs"}}
+{{if .ParentHint}}<div class="parent-hint" aria-label="serving root context">{{.ParentHint}}/</div>{{end}}
 <nav class="crumbs" aria-label="path">
   {{range $i, $c := .Crumbs}}
     {{if $i}}<span class="crumb-sep">/</span>{{end}}

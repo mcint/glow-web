@@ -282,6 +282,18 @@ func displayRoot(abs string) string {
 	return abs
 }
 
+// parentHint returns the display-form path of the directory above the serving
+// root, anchoring the breadcrumb in the surrounding filesystem context.
+// Empty string when the root is "/" (no parent) or when filepath.Dir reports
+// the same path (root is a filesystem root).
+func (s *Server) parentHint() string {
+	parent := filepath.Dir(s.Root)
+	if parent == s.Root || parent == "" {
+		return ""
+	}
+	return displayRoot(parent)
+}
+
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		s.handleSave(w, r)
@@ -369,6 +381,7 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 		Title:       displayName,
 		Name:        displayName,
 		Path:        displayPath(displayName, rel),
+		ParentHint:  s.parentHint(),
 		Crumbs:      s.crumbsForFile(rel, displayName),
 		Body:        template.HTML(body),
 		ViewURL:     selfURL,
@@ -407,6 +420,7 @@ func (s *Server) serveEdit(w http.ResponseWriter, src []byte, displayName, rel s
 		Title:       displayName + " (edit)",
 		Name:        displayName,
 		Path:        displayPath(displayName, rel),
+		ParentHint:  s.parentHint(),
 		Crumbs:      s.crumbsForFile(rel, displayName),
 		Source:      string(src),
 		ViewURL:     selfURL,
@@ -696,6 +710,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	data := indexData{
 		Title:       filepath.Base(s.Root),
 		Path:        displayRoot(s.Root),
+		ParentHint:  s.parentHint(),
 		Crumbs:      s.crumbsForIndex(prefixFilter),
 		Filter:      prefixFilter,
 		Files:       items,
@@ -883,6 +898,7 @@ type pageData struct {
 	Title       string
 	Name        string
 	Path        string
+	ParentHint  string // path above the serving root, e.g. "~/dev-llm"; empty at "/"
 	Crumbs      []crumb
 	Body        template.HTML
 	Source      string // edit page only
@@ -924,6 +940,7 @@ type indexItem struct {
 type indexData struct {
 	Title       string
 	Path        string  // home-relative project root, shown in footer
+	ParentHint  string  // path above the serving root, e.g. "~/dev-llm"; empty at "/"
 	Crumbs      []crumb // breadcrumb nav for current prefix filter
 	Filter      string  // current prefix filter (e.g. "sub/"); empty means root
 	Files       []indexItem
