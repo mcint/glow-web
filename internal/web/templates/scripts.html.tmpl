@@ -379,7 +379,10 @@ function K(suffix) { return KEY_PREFIX + suffix; }
   window.addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
       e.preventDefault();
-      isOpen() ? close() : open(true);
+      // Focus over toggle: cmd-k always focuses the sidebar input,
+      // showing it if hidden. Esc closes. (specs/sidebar-focus-and-marker.md §1)
+      if (isOpen()) input.focus();
+      else          open(true);
     } else if (e.key === 'Escape' && isOpen() && document.activeElement === input) {
       e.preventDefault();
       close();
