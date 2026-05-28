@@ -95,6 +95,26 @@ func loadStatus(ctx context.Context, root string, out map[string]Entry) error {
 	return nil
 }
 
+// FileDiff returns the unified diff of a single file vs HEAD. Returns empty
+// output (not an error) when the file is clean, untracked, or git is absent.
+func FileDiff(root, rel string) ([]byte, error) {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", abs, "diff", "HEAD", "--", rel)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, nil
+	}
+	return out, nil
+}
+
 // loadNumstat runs `git diff HEAD --numstat -z` to attach adds/dels. Each
 // record is "ADDS\tDELS\t<path>\x00" (NUL terminator) where binary files
 // report "-\t-\t…". Failures are silent — XY data from loadStatus stands.

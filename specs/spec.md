@@ -55,6 +55,7 @@ glow-web web PATH [flags]                        serve file OR directory
     --readonly                                   disable edit + save
     --markup                                     default to hybrid markup view
     --title-prefix glow-web                      <title> as "<prefix>: <doc>"; "" disables
+    --log-level off|dot|info                     access log: silent | "." per req | full line
 
 glow-web tui PATH                                styled TUI reader (stub in v0)
 glow-web slice PATH --heading "Foo / Bar"        extract a section by path
@@ -66,13 +67,14 @@ glow-web version                                 print build version
 
 ```
 GET  /                       index of discovered files (dir mode) or the file
-GET  /<rel>                  rendered HTML view
-GET  /<rel>?view=markup      hybrid view (markup chars muted, content styled)
-GET  /<rel>?view=rendered    explicit override of --markup default
+GET  /<rel>                  rendered HTML view (md) or plain text view (text class)
+GET  /<rel>?view=markup      hybrid view (markup chars muted, content styled; md only)
+GET  /<rel>?view=rendered    explicit override of --markup default (md only)
+GET  /<rel>?diff=1           inline diff view vs HEAD (dir mode, any class)
 GET  /<rel>?raw=1            text/plain
-GET  /<rel>?download=1       text/markdown attachment
-GET  /<rel>?edit=1           edit page (split-pane, live preview)
-POST /<rel>                  save (text/markdown body)
+GET  /<rel>?download=1       attachment (text/markdown for md, text/plain for text)
+GET  /<rel>?edit=1           edit page (split-pane, live preview; md only)
+POST /<rel>                  save (text/markdown body; md only)
 POST /_/render               live-preview helper: source body → HTML
 ```
 
@@ -150,9 +152,44 @@ and-forth between files doesn't require re-summoning it. Scroll memory
 restores on load except when the URL carries a `#anchor` (anchor scroll
 wins).
 
+Both the sidebar palette and the index-page filter share a fuzzy matcher
+modelled on fzf / skim. Whitespace splits the query into ordered tokens;
+each token is subsequence-matched against the remaining path. The
+algorithm tries up to 32 starting positions per token, tightens each
+window backwards to find the shortest span, and keeps the alignment with
+the best score. Scoring: path-component-initial (after `/`) and string-
+start get the largest bonus, word-boundary (after `_`, `-`, `.`, space)
+gets a moderate bonus, consecutive matched chars get a contiguity bonus,
+and unmatched chars inside the match window incur a gap penalty. Matched
+runs in the highlight are merged into a single `<mark>` span (not per-
+character) so the visual weight tracks the actual match structure.
+
+The sidebar also exposes a clickable close button (×) alongside the
+search input. The ☰ button in the header bar opens the sidebar. These
+complement the ⌘K / Esc keyboard shortcuts for environments where Esc is
+captured by browser extensions (e.g. Vimium).
+
 Aging-out of stale keys is left to the browser — entries are small (a
 few bytes each) and accumulate slowly; modern browsers evict origin
 storage under pressure.
+
+## Text file viewing
+
+Files classified as `"text"` (`.go`, `.py`, `.toml`, `.txt`, etc. — see
+`walk.classify()`) are viewable in the browser. They render in a `<pre>`
+block with line numbers. The index page links text files the same as
+markdown; the `?raw=1` and `?download=1` shortcuts work. Edit and
+markup/rendered toggling are markdown-only. The `"other"` class (binary,
+unknown) still 404s when requested directly.
+
+## Inline diff view
+
+Any file in dir mode exposes a "Diff" toggle in the header bar. Clicking
+it adds `?diff=1` and renders the unified diff vs HEAD (via `git diff
+HEAD -- <file>`). The diff is displayed as a `<pre>` block with colored
+spans: green for added lines, red for removed, accent for hunk headers.
+When the file is clean or untracked, a "No changes vs HEAD" message
+displays. The toggle switches to "View" to return to the normal render.
 
 ## Intra-project link rewriting
 

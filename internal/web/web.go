@@ -52,6 +52,8 @@ type Server struct {
 	TitlePrefix    string       // appended to <title>; "auto" = "glow-web:<port>", "" disables, else literal
 	TitlePort      string       // "auto" (port if known), "never" (omit), "always" — only affects "auto" prefix
 	Addr           string       // bound address (e.g. "127.0.0.1:8080"); set by CLI and updated after net.Listen
+	LogLevel       LogLevel     // per-request access logging; LogOff (default) skips the middleware entirely
+	LogOut         io.Writer    // log destination; nil means os.Stderr
 }
 
 // NewServer constructs a Server, autodetecting Mode from path's stat. walkOpts
@@ -76,16 +78,19 @@ func NewServer(p string, walkOpts walk.Options) (*Server, error) {
 
 // Handler returns the HTTP handler. The handler is wrapped in
 // http.StripPrefix when URLPrefix is non-empty, so internally registered
-// routes always see paths without the prefix.
+// routes always see paths without the prefix. When LogLevel != LogOff, the
+// access-log middleware wraps the outermost handler so prefix-stripping is
+// invisible to the log line.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/_/render", s.handleRender)
 	mux.HandleFunc("/_/files", s.handleFiles)
 	mux.HandleFunc("/", s.handleRoot)
-	if s.URLPrefix == "" {
-		return mux
+	var h http.Handler = mux
+	if s.URLPrefix != "" {
+		h = http.StripPrefix(s.URLPrefix, h)
 	}
-	return http.StripPrefix(s.URLPrefix, mux)
+	return logMiddleware(s.LogLevel, s.LogOut, h)
 }
 
 // Serve binds addr and blocks. Useful for the CLI; tests should use Handler().
@@ -310,14 +315,16 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		s.serveOne(w, r, s.Root, filepath.Base(s.Root), "")
+		s.serveOne(w, r, s.Root, filepath.Base(s.Root), "", "md")
 	case ModeDir:
 		if r.URL.Path == "/" {
 			s.serveIndex(w, r)
 			return
 		}
 		rel := strings.TrimPrefix(r.URL.Path, "/")
-		files, err := walk.Files(s.Walk)
+		serveOpts := s.Walk
+		serveOpts.IncludeText = true
+		files, err := walk.Files(serveOpts)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -327,13 +334,13 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		s.serveOne(w, r, match.Abs, match.Name, match.Rel)
+		s.serveOne(w, r, match.Abs, match.Name, match.Rel, match.Class)
 	}
 }
 
-// serveOne handles a single markdown URL: the rendered HTML view, plus the
-// ?raw=1 / ?download=1 / ?edit=1 short-circuits.
-func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayName, rel string) {
+// serveOne handles a single file URL: the rendered HTML view (markdown or
+// plain text), plus the ?raw=1 / ?download=1 / ?edit=1 short-circuits.
+func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayName, rel, class string) {
 	raw, err := os.ReadFile(abs)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -347,13 +354,17 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 		return
 	}
 	if q.Get("download") == "1" {
-		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		ct := "text/plain; charset=utf-8"
+		if class == "md" {
+			ct = "text/markdown; charset=utf-8"
+		}
+		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Content-Disposition",
 			fmt.Sprintf(`attachment; filename=%q`, displayName))
 		_, _ = w.Write(raw)
 		return
 	}
-	if q.Get("edit") == "1" {
+	if q.Get("edit") == "1" && class == "md" {
 		if s.ReadOnly {
 			http.Error(w, "edit disabled (--readonly)", http.StatusForbidden)
 			return
@@ -362,18 +373,32 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 		return
 	}
 
-	markup := s.viewIsMarkup(q.Get("view"))
 	var body []byte
-	if markup {
-		body = render.HTMLMarkup(raw)
-	} else {
-		body, err = render.HTMLWithOptions(raw, render.Options{
-			LinkResolver: s.linkResolver(rel),
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+	isMD := class == "md"
+	markup := isMD && s.viewIsMarkup(q.Get("view"))
+	showDiff := q.Get("diff") == "1"
+
+	if showDiff && s.Mode == ModeDir {
+		diffOut, _ := gitstatus.FileDiff(s.Root, rel)
+		if len(diffOut) > 0 {
+			body = renderDiffHTML(diffOut)
+		} else {
+			body = []byte(`<p class="diff-empty">No changes vs HEAD.</p>`)
 		}
+	} else if isMD {
+		if markup {
+			body = render.HTMLMarkup(raw)
+		} else {
+			body, err = render.HTMLWithOptions(raw, render.Options{
+				LinkResolver: s.linkResolver(rel),
+			})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+	} else {
+		body = renderTextPre(raw)
 	}
 
 	selfURL := s.urlFor(rel)
@@ -390,18 +415,27 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 		Version:     version.String(),
 		Markup:      markup,
 	}
-	if markup {
-		data.ToggleURL = selfURL + "?view=rendered"
-		data.ToggleLabel = "Rendered"
-	} else {
-		data.ToggleURL = selfURL + "?view=markup"
-		data.ToggleLabel = "Markup"
-	}
-	if !s.ReadOnly {
-		data.EditURL = selfURL + "?edit=1"
+	if isMD {
+		if markup {
+			data.ToggleURL = selfURL + "?view=rendered"
+			data.ToggleLabel = "Rendered"
+		} else {
+			data.ToggleURL = selfURL + "?view=markup"
+			data.ToggleLabel = "Markup"
+		}
+		if !s.ReadOnly {
+			data.EditURL = selfURL + "?edit=1"
+		}
 	}
 	if s.Mode == ModeDir {
 		data.IndexURL = s.urlFor("")
+		if showDiff {
+			data.DiffURL = selfURL
+			data.DiffLabel = "View"
+		} else {
+			data.DiffURL = selfURL + "?diff=1"
+			data.DiffLabel = "Diff"
+		}
 	}
 	data.Palette = s.CommandPalette
 	data.FilesURL = s.utilityURL("/_/files")
@@ -412,6 +446,52 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 	if err := pageTmpl.ExecuteTemplate(w, "view.html.tmpl", data); err != nil {
 		fmt.Fprintf(os.Stderr, "glow-web: view template: %v\n", err)
 	}
+}
+
+// renderTextPre wraps plain text in a <pre> block with line numbers.
+func renderTextPre(src []byte) []byte {
+	lines := strings.Split(string(src), "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	width := len(fmt.Sprintf("%d", len(lines)))
+	var buf strings.Builder
+	buf.WriteString(`<pre class="text-view"><code>`)
+	for i, line := range lines {
+		escaped := template.HTMLEscapeString(line)
+		fmt.Fprintf(&buf, `<span class="text-ln">%*d</span>  %s`+"\n", width, i+1, escaped)
+	}
+	buf.WriteString("</code></pre>")
+	return []byte(buf.String())
+}
+
+// renderDiffHTML formats unified diff output as colored HTML.
+func renderDiffHTML(diff []byte) []byte {
+	lines := strings.Split(string(diff), "\n")
+	var buf strings.Builder
+	buf.WriteString(`<pre class="diff-view"><code>`)
+	for _, line := range lines {
+		escaped := template.HTMLEscapeString(line)
+		switch {
+		case strings.HasPrefix(line, "+++ ") || strings.HasPrefix(line, "--- "):
+			fmt.Fprintf(&buf, "<span class=\"diff-file\">%s</span>\n", escaped)
+		case strings.HasPrefix(line, "@@"):
+			fmt.Fprintf(&buf, "<span class=\"diff-hunk\">%s</span>\n", escaped)
+		case strings.HasPrefix(line, "+"):
+			fmt.Fprintf(&buf, "<span class=\"diff-add\">%s</span>\n", escaped)
+		case strings.HasPrefix(line, "-"):
+			fmt.Fprintf(&buf, "<span class=\"diff-del\">%s</span>\n", escaped)
+		case strings.HasPrefix(line, "diff "):
+			fmt.Fprintf(&buf, "<span class=\"diff-header\">%s</span>\n", escaped)
+		case strings.HasPrefix(line, "index "):
+			fmt.Fprintf(&buf, "<span class=\"diff-header\">%s</span>\n", escaped)
+		default:
+			buf.WriteString(escaped)
+			buf.WriteByte('\n')
+		}
+	}
+	buf.WriteString("</code></pre>")
+	return []byte(buf.String())
 }
 
 func (s *Server) serveEdit(w http.ResponseWriter, src []byte, displayName, rel string) {
@@ -651,17 +731,20 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// Second walk with the user's actual options: this is the set whose
-	// rows get a clickable link. Anything in the wide walk but not the
-	// narrow walk is listing-only (no <a>), regardless of its class.
-	narrow, err := walk.Files(s.Walk)
+	// Second walk with text included: this is the set whose rows get a
+	// clickable link. Text files are always viewable; "other" class files
+	// remain listing-only. Anything in the wide walk but not this narrow
+	// walk is listing-only (no <a>).
+	narrowOpts := s.Walk
+	narrowOpts.IncludeText = true
+	narrow, err := walk.Files(narrowOpts)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	servable := make(map[string]struct{}, len(narrow))
 	for _, f := range narrow {
-		if f.Class == "md" {
+		if f.Class == "md" || f.Class == "text" {
 			servable[f.Rel] = struct{}{}
 		}
 	}
@@ -790,7 +873,9 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	var out []entry
 	if s.Mode == ModeDir {
-		files, err := walk.Files(s.Walk)
+		filesOpts := s.Walk
+		filesOpts.IncludeText = true
+		files, err := walk.Files(filesOpts)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -855,7 +940,7 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		match := findFile(files, rel)
-		if match == nil {
+		if match == nil || match.Class != "md" {
 			http.NotFound(w, r)
 			return
 		}
@@ -875,16 +960,15 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 
 // findFile gates serving on the walk result. It rejects path-traversal
 // attempts before consulting the list and refuses anything whose Class
-// isn't "md" — defense-in-depth so widening Walk options elsewhere can
-// never accidentally make non-markdown files servable. Raw-text serving
-// for "text" class files is a future feature with its own gate.
+// isn't "md" or "text" — defense-in-depth so widening Walk options
+// elsewhere can never accidentally make binary/"other" files servable.
 func findFile(files []walk.File, rel string) *walk.File {
 	clean := path.Clean(rel)
 	if clean == "." || strings.HasPrefix(clean, "..") || strings.HasPrefix(clean, "/") {
 		return nil
 	}
 	for i := range files {
-		if files[i].Rel == clean && files[i].Class == "md" {
+		if files[i].Rel == clean && (files[i].Class == "md" || files[i].Class == "text") {
 			return &files[i]
 		}
 	}
@@ -912,6 +996,8 @@ type pageData struct {
 	FilesURL    string // /_/files endpoint, used by command palette
 	ToggleURL   string // url to flip between rendered and markup views
 	ToggleLabel string // label shown on the toggle button
+	DiffURL     string // url to toggle inline diff view
+	DiffLabel   string // "Diff" or "View" — switches between diff and normal
 	ShowSave    bool
 	Markup      bool
 	Palette     bool   // include command palette overlay + script
@@ -925,7 +1011,7 @@ type indexItem struct {
 	Rel      string
 	Display  string // path with current prefix-filter trimmed off
 	Name     string
-	URL      string // empty when Class != "md" — template renders plain text instead of <a>
+	URL      string // empty for "other" class — template renders plain text instead of <a>
 	Size     int64
 	Mtime    int64  // Unix seconds, surfaced as data-mtime on the row for client-side sort/filter
 	MtimeRel string // compact relative form ("5m", "3d", …) for initial paint; JS recomputes on filter
