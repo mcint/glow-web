@@ -1,11 +1,13 @@
 package web_test
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -103,12 +105,12 @@ func TestDirMode_IndexListsDiscoveredFiles(t *testing.T) {
 			t.Errorf("index missing %q", want)
 		}
 	}
-	// Non-md / ignored entries appear as listing-only rows (hidden by CSS in
-	// default toggle state) but must never carry a servable link.
-	for _, leak := range []string{`href="/secret.md"`, `href="/ignore-me.txt"`} {
-		if strings.Contains(body, leak) {
-			t.Errorf("index leaked link for non-served file: %q", leak)
-		}
+	// Text files are linked (viewable); gitignored md files are not.
+	if !strings.Contains(body, `href="/ignore-me.txt"`) {
+		t.Error("index should link text files")
+	}
+	if strings.Contains(body, `href="/secret.md"`) {
+		t.Error("index leaked link for gitignored file")
 	}
 }
 
@@ -385,34 +387,49 @@ func TestIndex_CycleTogglesPresent(t *testing.T) {
 	}
 }
 
-func TestIndex_NonMdRowsListingOnly(t *testing.T) {
+func TestIndex_ToggleSegmentsWithCounts(t *testing.T) {
 	_, s := dirFixture(t)
 	rec := serve(s.Handler(), "GET", "/", "")
 	body := rec.Body.String()
-	// ignore-me.txt is text-class — listed (so client toggles can reveal it)
-	// but not linked.
+	// Each toggle renders as a segmented chip: three strata, each a .seg with
+	// a data-state and a .seg-n count slot the client fills. Aperture is
+	// cumulative, so the marginal strata carry "+" prefixes in their labels.
+	for _, want := range []string{
+		`class="seg-toggle"`,
+		`class="seg" data-state="md"`,
+		`class="seg" data-state="text"`,
+		`class="seg" data-state="all"`,
+		`class="seg" data-state="normal"`,
+		`class="seg" data-state="hidden"`,
+		`class="seg" data-state="ignored"`,
+		`class="seg-n"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index page missing toggle-segment markup %q", want)
+		}
+	}
+}
+
+func TestIndex_TextRowsLinked(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/", "")
+	body := rec.Body.String()
 	if !strings.Contains(body, `data-rel="ignore-me.txt"`) {
-		t.Errorf("index should list ignore-me.txt as a non-link row")
+		t.Errorf("index should list ignore-me.txt")
 	}
 	if !strings.Contains(body, `data-class="text"`) {
 		t.Errorf("ignore-me.txt should carry data-class=\"text\"")
 	}
-	if strings.Contains(body, `href="/ignore-me.txt"`) {
-		t.Errorf("non-md file must not be served as a link")
-	}
-	// And the no-link span styling identifies it as listing-only.
-	if !strings.Contains(body, `class="no-link"`) {
-		t.Errorf("non-md row should render with no-link span")
+	if !strings.Contains(body, `href="/ignore-me.txt"`) {
+		t.Errorf("text files should be linked in the index")
 	}
 }
 
-func TestDirMode_NonMdReturns404(t *testing.T) {
+func TestDirMode_TextFileServes200(t *testing.T) {
 	_, s := dirFixture(t)
-	// ignore-me.txt is in the widened walk for indexing but Class != "md",
-	// so findFile must refuse to serve it.
 	rec := serve(s.Handler(), "GET", "/ignore-me.txt", "")
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("non-md serve should 404, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("text file should serve 200, got %d", rec.Code)
 	}
 }
 
@@ -988,4 +1005,211 @@ func firstLine(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// --- text file viewing ---
+
+func TestDirMode_ServesTextFile(t *testing.T) {
+	dir, s := dirFixture(t)
+	mustWrite(t, filepath.Join(dir, "hello.go"), "package main\n\nfunc main() {}\n")
+	rec := serve(s.Handler(), "GET", "/hello.go", "")
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200 for text file", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`<pre class="text-view">`,
+		`<span class="text-ln">`,
+		`package main`,
+		`func main()`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("text view missing %q", want)
+		}
+	}
+	// Text files should NOT have markup/rendered toggle or edit link
+	for _, absent := range []string{`?view=markup`, `?edit=1`} {
+		if strings.Contains(body, absent) {
+			t.Errorf("text view should not contain %q", absent)
+		}
+	}
+}
+
+func TestDirMode_TextFileRaw(t *testing.T) {
+	dir, s := dirFixture(t)
+	mustWrite(t, filepath.Join(dir, "hello.go"), "package main\n")
+	rec := serve(s.Handler(), "GET", "/hello.go?raw=1", "")
+	if rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/plain") {
+		t.Errorf("Content-Type = %q, want text/plain", ct)
+	}
+	if got := rec.Body.String(); got != "package main\n" {
+		t.Errorf("raw body = %q", got)
+	}
+}
+
+func TestDirMode_OtherFileStill404(t *testing.T) {
+	dir, s := dirFixture(t)
+	mustWrite(t, filepath.Join(dir, "image.png"), "\x89PNG")
+	rec := serve(s.Handler(), "GET", "/image.png", "")
+	if rec.Code != 404 {
+		t.Fatalf("status = %d, want 404 for 'other' class file", rec.Code)
+	}
+}
+
+// --- diff view ---
+
+func TestDirMode_DiffTogglePresent(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/alpha.md", "")
+	body := rec.Body.String()
+	if !strings.Contains(body, `?diff=1`) {
+		t.Error("view page should contain diff toggle link")
+	}
+	if !strings.Contains(body, `>Diff<`) {
+		t.Error("view page should show 'Diff' toggle label")
+	}
+}
+
+func TestDirMode_DiffViewShowsBackToggle(t *testing.T) {
+	_, s := dirFixture(t)
+	rec := serve(s.Handler(), "GET", "/alpha.md?diff=1", "")
+	if rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `>View<`) {
+		t.Error("diff view should show 'View' toggle to return to normal view")
+	}
+}
+
+func TestDirMode_DiffViewWithGitRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a.md"), "original\n")
+	runGit(t, dir, "init", "-q")
+	runGit(t, dir, "config", "user.email", "test@example.com")
+	runGit(t, dir, "config", "user.name", "Test")
+	runGit(t, dir, "add", "a.md")
+	runGit(t, dir, "commit", "-q", "-m", "init")
+	mustWrite(t, filepath.Join(dir, "a.md"), "modified\n")
+
+	s, err := web.NewServer(dir, walk.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := serve(s.Handler(), "GET", "/a.md?diff=1", "")
+	if rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `class="diff-view"`) {
+		t.Error("diff view should render with diff-view class")
+	}
+	if !strings.Contains(body, `class="diff-add"`) {
+		t.Error("diff should highlight added lines")
+	}
+	if !strings.Contains(body, `class="diff-del"`) {
+		t.Error("diff should highlight deleted lines")
+	}
+}
+
+// --- access log (--log-level) ---
+
+func TestParseLogLevel_AcceptedValues(t *testing.T) {
+	cases := []struct {
+		in   string
+		want web.LogLevel
+	}{
+		{"", web.LogOff},
+		{"off", web.LogOff},
+		{"none", web.LogOff},
+		{"silent", web.LogOff},
+		{"dot", web.LogDot},
+		{"info", web.LogInfo},
+	}
+	for _, c := range cases {
+		got, err := web.ParseLogLevel(c.in)
+		if err != nil {
+			t.Errorf("ParseLogLevel(%q) error: %v", c.in, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("ParseLogLevel(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestParseLogLevel_RejectsUnknown(t *testing.T) {
+	if _, err := web.ParseLogLevel("verbose"); err == nil {
+		t.Errorf("ParseLogLevel(\"verbose\") should error")
+	}
+}
+
+func TestAccessLog_OffWritesNothing(t *testing.T) {
+	_, s := dirFixture(t)
+	var buf bytes.Buffer
+	s.LogLevel = web.LogOff
+	s.LogOut = &buf
+	serve(s.Handler(), "GET", "/alpha.md", "")
+	serve(s.Handler(), "GET", "/", "")
+	if buf.Len() != 0 {
+		t.Errorf("LogOff should not write anything, got %q", buf.String())
+	}
+}
+
+func TestAccessLog_DotPerRequestNoNewline(t *testing.T) {
+	_, s := dirFixture(t)
+	var buf bytes.Buffer
+	s.LogLevel = web.LogDot
+	s.LogOut = &buf
+	serve(s.Handler(), "GET", "/alpha.md", "")
+	serve(s.Handler(), "GET", "/", "")
+	serve(s.Handler(), "GET", "/_/files", "")
+	if got := buf.String(); got != "..." {
+		t.Errorf("LogDot should write one '.' per request with no newline, got %q", got)
+	}
+}
+
+func TestAccessLog_InfoFormat(t *testing.T) {
+	_, s := dirFixture(t)
+	var buf bytes.Buffer
+	s.LogLevel = web.LogInfo
+	s.LogOut = &buf
+	serve(s.Handler(), "GET", "/alpha.md", "")
+	got := buf.String()
+	// Format: "<client> GET /alpha.md 200 <bytes> <duration>\n"
+	pat := regexp.MustCompile(`^\S+ GET /alpha\.md 200 \d+ \S+\n$`)
+	if !pat.MatchString(got) {
+		t.Errorf("LogInfo line shape mismatch, got %q", got)
+	}
+}
+
+func TestAccessLog_InfoCapturesNon200Status(t *testing.T) {
+	_, s := dirFixture(t)
+	var buf bytes.Buffer
+	s.LogLevel = web.LogInfo
+	s.LogOut = &buf
+	serve(s.Handler(), "GET", "/does-not-exist.md", "")
+	got := buf.String()
+	if !strings.Contains(got, " 404 ") {
+		t.Errorf("LogInfo should report the 404 status, got %q", got)
+	}
+}
+
+func TestAccessLog_InfoLineCountMatchesRequests(t *testing.T) {
+	_, s := dirFixture(t)
+	var buf bytes.Buffer
+	s.LogLevel = web.LogInfo
+	s.LogOut = &buf
+	for i := 0; i < 3; i++ {
+		serve(s.Handler(), "GET", "/alpha.md", "")
+	}
+	if n := strings.Count(buf.String(), "\n"); n != 3 {
+		t.Errorf("expected 3 log lines for 3 requests, got %d in %q", n, buf.String())
+	}
 }

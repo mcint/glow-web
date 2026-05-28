@@ -16,14 +16,34 @@ While we're pre-1.0, minors are allowed to break things; patches will not.
   vs HEAD. Click any column header to cycle sort asc → desc →
   default; sort state persists per-project in `localStorage`.
   Spec: `specs/index-table-and-git.md`.
-- Class-cycle toggle on the index — `[md]` → `[+text]` → `[all]` —
-  to widen the listing from markdown to common text/config files
-  to everything. Non-md rows render as listing-only (no link); the
-  serving allowlist remains markdown-only. Persisted in
-  `localStorage` under `index-class`.
-- Hidden-cycle toggle on the index — `[normal]` → `[+hidden]` →
-  `[+ignored]` — to expose dotfiles and gitignored files.
-  Orthogonal to the class toggle; persisted under `index-hidden`.
+- Text file viewing: `.go`, `.py`, `.toml`, `.txt` and other
+  `"text"` class files are now viewable in the browser, rendered
+  as `<pre>` with line numbers. `?raw=1` and `?download=1` work.
+  Edit and markup toggle remain markdown-only; `"other"` class
+  (binary/unknown) still 404s. Index links text files alongside
+  markdown.
+- Inline diff view: "Diff" toggle in the file-view header bar
+  shows `git diff HEAD` output with colored add/del/hunk spans.
+  "View" returns to the normal render. Dir mode only.
+- Sidebar: clickable × close button and ☰ header-bar toggle for
+  environments where Esc is captured (e.g. Vimium).
+- fzf-style fuzzy matching in the sidebar palette and index
+  filter. Tries up to 32 start positions per token, tightens each
+  window backwards, scores path-component-initial and contiguity.
+  Merged `<mark>` spans for contiguous character runs.
+- Parent-hint path displays above breadcrumbs on its own line;
+  breadcrumbs indent slightly from the context path.
+- Hidden/ignored rows get a subtle grey background tint when
+  exposed via the toggle. Untracked files (`??`) get accent
+  coloring on the git status cell.
+- Segmented filter chips on the index. The class chip widens the
+  listing `md` → `+text` → `+all`; the hidden chip widens `normal`
+  → `+hidden` → `+ignored`. One click cycles the aperture; all three
+  strata stay visible, each showing its **marginal file count** (how
+  many more rows widening to it admits). Included strata are
+  full-contrast, the rest desaturated. Counts are conditioned on the
+  sibling chip, so a segment's number matches what it would reveal.
+  Persisted in `localStorage` under `index-class` / `index-hidden`.
 - Per-row git status when the served directory is a git repo:
   shells once to `git status --porcelain=v1 -z` and once to
   `git diff HEAD --numstat -z`. Missing `.git` or missing `git`
@@ -35,6 +55,11 @@ While we're pre-1.0, minors are allowed to break things; patches will not.
   and `IncludeIgnored`. `walk.File` gains `Class` (`md` / `text` /
   `other`), `Hidden`, and `Ignored` fields. `.git/` is always
   pruned regardless of options.
+- `--log-level=off|dot|info` flag for per-request access logging.
+  Default `off` keeps the existing silent behavior; `dot` writes a
+  bare `.` per request (no newline) as a heartbeat; `info` writes one
+  line per request with client, method, path, status, bytes, and
+  duration. Spec: `specs/access-log.md`.
 - `/_/files` JSON entries now carry `mtime` (Unix seconds). Index
   page `<li>` elements get `data-mtime` for the same reason.
 - Filter rendering shows a relative-time hint (`5m` / `3h` / `2d` /

@@ -57,8 +57,11 @@ function K(suffix) { return KEY_PREFIX + suffix; }
 {{if .Palette}}
 <aside id="palette" class="palette" role="navigation" aria-label="files">
   <div class="palette-box">
-    <input id="palette-input" type="text" placeholder="jump to file…  (esc to close)"
-           autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <div class="palette-header">
+      <input id="palette-input" type="text" placeholder="jump to file…"
+             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <button id="palette-close" type="button" class="palette-close-btn" aria-label="close sidebar" title="close sidebar">×</button>
+    </div>
     <ul id="palette-results" role="listbox"></ul>
   </div>
 </aside>
@@ -66,53 +69,84 @@ function K(suffix) { return KEY_PREFIX + suffix; }
 <script>
 (function() {
   // ---- shared fuzzy match ----
-  // Subsequence match with fzf-style scoring: rewards contiguous runs and
-  // word-boundary hits, penalises later positions. Lower score = better.
-  //
-  // Whitespace in the query splits it into ordered tokens — each token must
-  // subsequence-match in order, advancing past the previous token. Lets
-  // users type `cc 5w se` to match `cc/5wh/seed.md` (one token per path
-  // segment) without typing the slashes. Word-boundary bonus fires on a
-  // token's first char when it lands right after a `/` or `_`, so cleanly-
-  // segmented matches outscore cluttered ones.
+  // fzf/skim-style scoring: tries multiple starting positions per token,
+  // tightens each window backwards, keeps the best alignment. Lower = better.
+  // Whitespace splits the query into ordered tokens (type path-segment
+  // initials without slashes: `iw wt` matches `internal/web/web_test.go`).
   function fuzzyMatch(query, target) {
     const trimmed = (query || '').trim();
     if (!trimmed) return { match: true, indices: [], score: 0 };
     const tokens = trimmed.toLowerCase().split(/\s+/);
-    const t = target.toLowerCase();
+    const lo = target.toLowerCase();
     const allIndices = [];
     let cursor = 0;
     let totalScore = 0;
     for (const tok of tokens) {
-      let i = 0, lastHit = -2;
-      const tokIdx = [];
-      let tokScore = 0;
-      for (let j = cursor; j < t.length && i < tok.length; j++) {
-        if (t[j] === tok[i]) {
-          tokIdx.push(j);
-          if (j === lastHit + 1) tokScore -= 4;                   // contiguous bonus
-          if (j === 0 || /[\W_/]/.test(t[j-1])) tokScore -= 6;    // word-boundary bonus
-          tokScore += j * 0.5;                                    // earlier-is-better
-          lastHit = j;
-          i++;
-        }
-      }
-      if (i < tok.length) return { match: false, indices: [], score: 0 };
-      allIndices.push(...tokIdx);
-      totalScore += tokScore;
-      cursor = lastHit + 1;
+      const r = bestTokenMatch(tok, lo, cursor);
+      if (!r) return { match: false, indices: [], score: 0 };
+      allIndices.push(...r.indices);
+      totalScore += r.score;
+      cursor = r.indices[r.indices.length - 1] + 1;
     }
     return { match: true, indices: allIndices, score: totalScore };
+  }
+  function bestTokenMatch(tok, lo, from) {
+    let best = null;
+    let tried = 0;
+    for (let s = from; s <= lo.length - tok.length && tried < 32; s++) {
+      if (lo[s] !== tok[0]) continue;
+      tried++;
+      const fwd = [];
+      let ci = 0;
+      for (let j = s; j < lo.length && ci < tok.length; j++) {
+        if (lo[j] === tok[ci]) { fwd.push(j); ci++; }
+      }
+      if (ci < tok.length) continue;
+      const tight = fwd.slice();
+      ci = tok.length - 1;
+      for (let j = tight[ci]; j >= tight[0] && ci >= 0; j--) {
+        if (lo[j] === tok[ci]) { tight[ci] = j; ci--; }
+      }
+      const sc = scorePositions(tight, lo);
+      if (!best || sc < best.score) best = { indices: tight, score: sc };
+    }
+    return best;
+  }
+  function scorePositions(indices, lo) {
+    let score = 0;
+    for (let k = 0; k < indices.length; k++) {
+      const j = indices[k];
+      if (k > 0 && j === indices[k - 1] + 1) score -= 6;
+      if (j === 0) score -= 10;
+      else {
+        const prev = lo[j - 1];
+        if (prev === '/') score -= 10;
+        else if (prev === '.' || prev === '_' || prev === '-' || prev === ' ') score -= 7;
+      }
+      score += j * 0.1;
+    }
+    if (indices.length > 1) {
+      const span = indices[indices.length - 1] - indices[0] + 1;
+      score += (span - indices.length) * 1.5;
+    }
+    return score;
   }
   function escapeHTML(s) {
     return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
   }
   function highlight(text, indices) {
     if (!indices || !indices.length) return escapeHTML(text);
-    let out = '', last = 0;
-    for (const idx of indices) {
-      out += escapeHTML(text.slice(last, idx)) + '<mark>' + escapeHTML(text[idx]) + '</mark>';
-      last = idx + 1;
+    let out = '', last = 0, i = 0;
+    while (i < indices.length) {
+      const runStart = indices[i];
+      let runEnd = runStart;
+      while (i + 1 < indices.length && indices[i + 1] === runEnd + 1) {
+        i++; runEnd = indices[i];
+      }
+      out += escapeHTML(text.slice(last, runStart));
+      out += '<mark>' + escapeHTML(text.slice(runStart, runEnd + 1)) + '</mark>';
+      last = runEnd + 1;
+      i++;
     }
     return out + escapeHTML(text.slice(last));
   }
@@ -205,6 +239,36 @@ function K(suffix) { return KEY_PREFIX + suffix; }
       return true;
     }
 
+    // Fill one segment's count slot.
+    function setSeg(btnId, state, n) {
+      const el = document.querySelector('#' + btnId + ' .seg[data-state="' + state + '"] .seg-n');
+      if (el) el.textContent = n;
+    }
+    // Marginal file counts per stratum, painted onto the segmented chips.
+    // Each dimension is tallied among files that pass the OTHER dimension's
+    // current filter, so a stratum's number matches what widening to it would
+    // actually reveal. The text query is ignored here — the 'N files' counter
+    // already reflects it; these chips describe the directory's shape.
+    function paintStrata() {
+      const cls = document.body.getAttribute('data-index-class')  || 'md';
+      const hid = document.body.getAttribute('data-index-hidden') || 'normal';
+      let md = 0, text = 0, other = 0, normal = 0, hidden = 0, ignored = 0;
+      for (const tr of items) {
+        const c = tr.dataset.class || 'md';
+        const isHid = !!tr.dataset.hidden, isIgn = !!tr.dataset.ignored;
+        const passHidden = hid === 'ignored' ? true
+                         : hid === 'hidden'  ? !isIgn
+                         : !(isHid || isIgn);
+        const passClass  = cls === 'all'  ? true
+                         : cls === 'text' ? c !== 'other'
+                         : c === 'md';
+        if (passHidden) { if (c === 'md') md++; else if (c === 'text') text++; else other++; }
+        if (passClass)  { if (isIgn) ignored++; else if (isHid) hidden++; else normal++; }
+      }
+      setSeg('class-toggle', 'md', md);  setSeg('class-toggle', 'text', text); setSeg('class-toggle', 'all', other);
+      setSeg('hidden-toggle', 'normal', normal); setSeg('hidden-toggle', 'hidden', hidden); setSeg('hidden-toggle', 'ignored', ignored);
+    }
+
     const rerender = () => {
       const q = indexFilter.value;
       let visible = 0;
@@ -229,6 +293,7 @@ function K(suffix) { return KEY_PREFIX + suffix; }
         if (passesToggle(s.tr)) visible++;
       }
       if (counter) counter.textContent = visible + ' files';
+      paintStrata();
     };
     // Expose so the cycle toggles can refresh the count without
     // duplicating the count walk.
@@ -262,11 +327,12 @@ function K(suffix) { return KEY_PREFIX + suffix; }
     if (sortState.key && sortState.dir) rerender();
   }
 
-  // ---- class + hidden cycle toggles (index page) ----
-  // Each toggle is a 3-state cycle persisted in localStorage. CSS keys off
-  // body[data-index-class] / body[data-index-hidden] to hide rows; the JS
-  // just paints the button label and writes the body attr.
-  function wireCycle(btnId, attrName, storageKey, order, labels) {
+  // ---- class + hidden segmented toggles (index page) ----
+  // Each toggle is a 3-state cumulative aperture persisted in localStorage.
+  // CSS keys off body[data-index-class] / body[data-index-hidden] to hide
+  // rows; the JS writes the body attr and lights up the .seg strata at or
+  // below the current aperture (the marginal counts are filled by rerender).
+  function wireCycle(btnId, attrName, storageKey, order) {
     const btn = document.getElementById(btnId);
     if (!btn) return;
     const KEY = K(storageKey);
@@ -283,8 +349,12 @@ function K(suffix) { return KEY_PREFIX + suffix; }
     }
     function apply() {
       const v = get();
+      const cur = order.indexOf(v);
       document.body.setAttribute(attrName, v);
-      btn.textContent = labels[v] || labels[order[0]];
+      btn.querySelectorAll('.seg').forEach(seg => {
+        const idx = order.indexOf(seg.dataset.state);
+        seg.classList.toggle('is-on', idx >= 0 && idx <= cur);
+      });
       if (typeof window.__indexRerender === 'function') window.__indexRerender();
     }
     btn.addEventListener('click', () => {
@@ -293,12 +363,8 @@ function K(suffix) { return KEY_PREFIX + suffix; }
     });
     apply();
   }
-  wireCycle('class-toggle',  'data-index-class',  'index-class',
-            ['md', 'text', 'all'],
-            {md: '[md]', text: '[+text]', all: '[all]'});
-  wireCycle('hidden-toggle', 'data-index-hidden', 'index-hidden',
-            ['normal', 'hidden', 'ignored'],
-            {normal: '[normal]', hidden: '[+hidden]', ignored: '[+ignored]'});
+  wireCycle('class-toggle',  'data-index-class',  'index-class',  ['md', 'text', 'all']);
+  wireCycle('hidden-toggle', 'data-index-hidden', 'index-hidden', ['normal', 'hidden', 'ignored']);
 
   // ---- file palette as persistent left sidebar ----
   // Opens on ⌘K / Ctrl-K, sticks across page navigations via localStorage,
@@ -339,6 +405,7 @@ function K(suffix) { return KEY_PREFIX + suffix; }
     input.blur();
   }
   function isOpen() { return palette.dataset.open === '1'; }
+  document.getElementById('palette-close').addEventListener('click', close);
   function move(dir) {
     if (!current.length) return;
     selected = (selected + dir + current.length) % current.length;
@@ -396,8 +463,13 @@ function K(suffix) { return KEY_PREFIX + suffix; }
     else if (e.key === 'Escape') { e.preventDefault(); close(); }
   });
 
-  // Restore prior open state without auto-focusing the input — the user
-  // is presumably reading the page, not typing.
+  const sidebarToggle = document.getElementById('sidebar-toggle');
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener('click', () => {
+      if (isOpen()) close(); else open(true);
+    });
+  }
+
   let stored = null;
   try { stored = localStorage.getItem(STATE_KEY); } catch (e) {}
   if (stored === '1') open(false);

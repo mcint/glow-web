@@ -44,9 +44,12 @@ body {
 .parent-hint {
   color: var(--muted); font-size: .75rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  opacity: .7; margin-bottom: .05em;
+  opacity: .7;
+  flex-basis: 100%; /* force own line above crumbs */
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-bottom: -.4rem; /* tighten gap to crumbs below */
 }
+.parent-hint + .crumbs { padding-left: .6rem; }
 
 .theme-toggle {
   min-width: 2.2em; padding: .25rem .4rem; text-align: center;
@@ -55,6 +58,29 @@ body {
   font: inherit; font-size: .95em; cursor: pointer; line-height: 1;
 }
 .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Segmented filter chips (class / hidden). One <button> per dimension; click
+   cycles the aperture wider. Each stratum is a .seg showing its marginal file
+   count. Strata at or below the current aperture are full-contrast (showing);
+   strata above it are desaturated (not currently shown) — the fill level reads
+   as how wide the aperture is open. */
+.seg-toggle {
+  display: inline-flex; align-items: stretch; padding: 0; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: transparent; color: var(--fg);
+  font: inherit; font-size: .82em; cursor: pointer; line-height: 1;
+}
+.seg-toggle:hover { border-color: var(--accent); }
+.seg-toggle .seg {
+  padding: .28rem .45rem; opacity: .38; white-space: nowrap;
+  border-right: 1px solid var(--border); transition: opacity .12s;
+}
+.seg-toggle .seg:last-child { border-right: 0; }
+.seg-toggle .seg.is-on { opacity: 1; }
+.seg-toggle .seg-n { font-weight: 600; margin-left: .15em; }
+/* On hover, lift the dimmed strata enough to read before committing a click. */
+.seg-toggle:hover .seg { opacity: .65; }
+.seg-toggle:hover .seg.is-on { opacity: 1; }
 .bar-actions { display: flex; gap: .4rem; align-items: center; }
 .bar-actions a, .bar-actions button {
   padding: .25rem .65rem; border: 1px solid var(--border);
@@ -137,6 +163,16 @@ body[data-index-hidden="normal"] table.files tr[data-ignored="1"],
 body[data-index-hidden="hidden"] table.files tr[data-ignored="1"] { display: none; }
 table.files tr[data-ignored="1"] td { opacity: .55; font-style: italic; }
 table.files tr[data-hidden="1"]:not([data-ignored="1"]) td.col-name { color: var(--muted); }
+/* When the toggle exposes hidden/ignored rows, give them a subtle
+   desaturated background so you can tell why they were hidden. */
+body[data-index-hidden="hidden"]  table.files tr[data-hidden="1"],
+body[data-index-hidden="ignored"] table.files tr[data-hidden="1"]  { background: rgba(128,128,128,.06); }
+body[data-index-hidden="ignored"] table.files tr[data-ignored="1"] { background: rgba(128,128,128,.09); }
+:root[data-theme="dark"] body[data-index-hidden="hidden"]  table.files tr[data-hidden="1"],
+:root[data-theme="dark"] body[data-index-hidden="ignored"] table.files tr[data-hidden="1"]  { background: rgba(180,180,180,.06); }
+:root[data-theme="dark"] body[data-index-hidden="ignored"] table.files tr[data-ignored="1"] { background: rgba(180,180,180,.09); }
+/* Untracked files: tint the git XY cell */
+table.files td.col-git-xy[data-untracked] { color: var(--accent); opacity: .7; }
 footer {
   border-top: 1px solid var(--border); padding: .75rem 1rem;
   color: var(--muted); font-size: .8em;
@@ -179,6 +215,19 @@ footer a { color: var(--muted); }
 .md-markup a { color: var(--accent); text-decoration: underline; }
 .md-markup .md-link-url { color: var(--muted); opacity: 0.55; font-size: .92em; }
 
+/* diff + plain-text viewer */
+.diff-view, .text-view { background: var(--bg); padding: 1rem; overflow-x: auto; }
+.diff-view code, .text-view code { font-size: .9em; }
+.text-ln { color: var(--muted); opacity: .5; user-select: none; }
+.diff-header { color: var(--muted); }
+.diff-file { color: var(--fg); font-weight: 600; }
+.diff-hunk { color: var(--accent); }
+.diff-add { background: rgba(21,128,61,.12); color: #15803d; }
+.diff-del { background: rgba(185,28,28,.12); color: #b91c1c; }
+.diff-empty { color: var(--muted); font-style: italic; }
+:root[data-theme="dark"] .diff-add { background: rgba(74,222,128,.12); color: #4ade80; }
+:root[data-theme="dark"] .diff-del { background: rgba(248,113,113,.12); color: #f87171; }
+
 /* command palette + index filter */
 .bar-actions input[type="search"], .bar-actions input[type="text"]#index-filter {
   padding: .25rem .55rem; border: 1px solid var(--border);
@@ -209,12 +258,21 @@ mark { background: rgba(255, 215, 0, 0.45); color: inherit; padding: 0 .05em; bo
   background: transparent; border: 0; border-radius: 0;
   width: 100%; box-shadow: none; overflow: hidden;
 }
-.palette-box input {
-  width: 100%; padding: .85rem 1rem; border: 0;
+.palette-header {
+  display: flex; align-items: center;
   border-bottom: 1px solid var(--border);
+}
+.palette-header input {
+  flex: 1; padding: .85rem 1rem; border: 0;
   background: transparent; color: var(--fg);
   font: inherit; font-size: 1rem; outline: none;
 }
+.palette-close-btn {
+  background: transparent; border: 0; color: var(--muted);
+  font-size: 1.3rem; cursor: pointer; padding: .5rem .75rem;
+  line-height: 1; opacity: .7;
+}
+.palette-close-btn:hover { color: var(--fg); opacity: 1; }
 .palette-box ul {
   list-style: none; padding: .25rem 0; margin: 0;
   flex: 1; overflow-y: auto;

@@ -25,22 +25,44 @@ Click a `<th>` to cycle that column through asc → desc → default
 `localStorage` under `K('index-sort')` as `"col:dir"` (e.g.
 `"mtime:desc"`); `""` is "default".
 
-### Two cycle toggles in the header bar
+### Two segmented toggles in the header bar
 
-Both toggles sit in `.bar-actions`, mirror the existing
-`#theme-toggle` ergonomics (compact button, single click cycles), and
-persist independently in `localStorage`.
+Both toggles sit in `.bar-actions` and persist independently in
+`localStorage`. Each is a single `<button class="seg-toggle">` — one
+click still cycles the aperture wider (and wraps) — but instead of a
+one-word label it renders all three strata as `.seg` segments, each
+carrying a marginal file count:
 
-| Toggle  | States                                  | Key                    |
-| ------- | --------------------------------------- | ---------------------- |
-| class   | `[md]` → `[+text]` → `[all]`            | `K('index-class')`     |
-| hidden  | `[normal]` → `[+hidden]` → `[+ignored]` | `K('index-hidden')`    |
+| Toggle  | Segments (aperture widens left → right)            | Key                |
+| ------- | -------------------------------------------------- | ------------------ |
+| class   | `md N` · `+text N` · `+all N`                      | `K('index-class')` |
+| hidden  | `normal N` · `+hidden N` · `+ignored N`            | `K('index-hidden')`|
 
-The two are orthogonal. CSS hides rows whose `data-class` /
-`data-hidden` / `data-ignored` attributes don't match the active
-states. The class toggle decides *which file extensions* appear; the
-hidden toggle decides whether dotfiles and gitignored files appear at
-all.
+The states are **cumulative apertures** (`md ⊆ text ⊆ all`;
+`normal ⊆ +hidden ⊆ +ignored`), so each strata's count is the
+*marginal* contribution — how many additional rows widening to that
+stratum admits. Segments at or below the current aperture get the
+`.is-on` class (full contrast); strata above it stay desaturated
+(`opacity` ~.38, lifting on hover so they stay readable before a click).
+The fill level reads as how far the aperture is open.
+
+The two dimensions are orthogonal in their row-hiding effect — CSS still
+hides rows whose `data-class` / `data-hidden` / `data-ignored` don't
+match the active states. But the **counts are conditioned on the sibling
+toggle**: the class strata are tallied only among files that pass the
+current hidden filter, and vice-versa, so a segment's number matches what
+widening to it would actually reveal. Changing one toggle repaints the
+other's counts. Counts are computed client-side in `paintStrata()`
+(`scripts.html.tmpl`) during `rerender`, walking the in-DOM rows once.
+
+**Decision: counts ignore the text-filter query.** The chips describe the
+directory's *shape* (a stable legend); the `N files` counter already
+reflects the live query. Prioritizes legibility + stability over
+per-keystroke accuracy during active filtering — the marginal accuracy
+lost there is recovered by the counter. (Reversal condition: if users
+read the chip counts as "matches", fold the query in.) Hover-to-expand a
+larger detail panel was considered and deferred — the always-visible
+compact counts cover the need.
 
 ### Git status columns
 
@@ -152,10 +174,12 @@ After implementation:
 2. `go run ./cmd/glow-web web .` against this repo:
    - Index renders as a table; default sort by name.
    - Each `<th>` click reorders rows; reload preserves sort state.
-   - Class cycle `[md]` → `[+text]` → `[all]` reveals more rows;
-     non-md rows have no link.
-   - Hidden cycle `[normal]` → `[+hidden]` → `[+ignored]` exposes
-     dotfiles then gitignored files.
+   - Class chip widens `md` → `+text` → `+all`, revealing more rows;
+     non-md rows have no link. Each segment shows its marginal count;
+     the included strata are full-contrast, the rest desaturated.
+   - Hidden chip widens `normal` → `+hidden` → `+ignored`, exposing
+     dotfiles then gitignored files. Widening one chip repaints the
+     other's marginal counts.
    - Edit `internal/web/web.go` locally → row shows ` M` + `+N -M`.
      `git add` → row shows `M ` + numstat reflects index-vs-HEAD.
 3. `go run ./cmd/glow-web web testdata/` (non-git):
