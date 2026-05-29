@@ -9,23 +9,27 @@
 </head>
 <body data-index-class="md" data-index-hidden="normal">
 <header class="bar">
-  {{template "crumbs" .}}
+  {{if .Palette}}<button id="sidebar-toggle" type="button" class="sidebar-toggle" title="file list (⌘K)">☰</button>{{end}}
+  <div class="browser">
+    {{template "crumbs" .}}
+    <div class="browser-controls">
+      <input type="text" id="index-filter" placeholder="filter…" autocomplete="off"
+             autocapitalize="off" spellcheck="false">
+      <span class="bar-path" id="count">{{.Count}} files</span>
+      <button id="class-toggle" type="button" class="seg-toggle" title="class filter (click to widen)">
+        <span class="seg" data-state="md">md <b class="seg-n"></b></span>
+        <span class="seg" data-state="text">+text <b class="seg-n"></b></span>
+        <span class="seg" data-state="all">+all <b class="seg-n"></b></span>
+      </button>
+      <button id="hidden-toggle" type="button" class="seg-toggle" title="hidden filter (click to widen)">
+        <span class="seg" data-state="normal">normal <b class="seg-n"></b></span>
+        <span class="seg" data-state="hidden">+hidden <b class="seg-n"></b></span>
+        <span class="seg" data-state="ignored">+ignored <b class="seg-n"></b></span>
+      </button>
+    </div>
+  </div>
   <nav class="bar-actions">
-    <input type="text" id="index-filter" placeholder="filter…" autocomplete="off"
-           autocapitalize="off" spellcheck="false">
-    <span class="bar-path" id="count">{{.Count}} files</span>
-    <button id="class-toggle" type="button" class="seg-toggle" title="class filter (click to widen)">
-      <span class="seg" data-state="md">md <b class="seg-n"></b></span>
-      <span class="seg" data-state="text">+text <b class="seg-n"></b></span>
-      <span class="seg" data-state="all">+all <b class="seg-n"></b></span>
-    </button>
-    <button id="hidden-toggle" type="button" class="seg-toggle" title="hidden filter (click to widen)">
-      <span class="seg" data-state="normal">normal <b class="seg-n"></b></span>
-      <span class="seg" data-state="hidden">+hidden <b class="seg-n"></b></span>
-      <span class="seg" data-state="ignored">+ignored <b class="seg-n"></b></span>
-    </button>
-    {{if .Palette}}<button id="sidebar-toggle" type="button" class="theme-toggle" title="file list (⌘K)">☰</button>{{end}}
-    <button id="theme-toggle"  type="button" class="theme-toggle">◐</button>
+    <button id="theme-toggle" type="button" class="theme-toggle">◐</button>
   </nav>
 </header>
 <main>

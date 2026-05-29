@@ -23,17 +23,31 @@ body {
 }
 .bar {
   background: var(--bar-bg); border-bottom: 1px solid var(--border);
-  padding: .55rem 1rem; display: flex; align-items: center;
+  padding: .55rem 1rem; display: flex; align-items: flex-start;
   gap: 1rem; flex-wrap: wrap;
 }
+.bar-actions { align-self: flex-start; }
 .bar-path {
   color: var(--muted); font-size: .85em;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* The permanent file-browser wrapper: takes the bar's free width and stacks
+   location (context path + crumbs) over the dir-view-only controls. Its
+   nesting mirrors scope — crumbs are present everywhere, controls only when
+   browsing a listing — and gives crumbs the full width so they stop wrapping
+   against the filter row. */
+.browser {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: .35rem;
+}
+.browser-loc { display: flex; flex-direction: column; min-width: 0; }
+.browser-controls {
+  display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
+}
 .crumbs {
   display: flex; align-items: baseline; gap: .35em;
-  flex: 1; min-width: 0; flex-wrap: wrap;
+  min-width: 0; flex-wrap: wrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: .95rem;
 }
@@ -45,9 +59,7 @@ body {
   color: var(--muted); font-size: .75rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   opacity: .7;
-  flex-basis: 100%; /* force own line above crumbs */
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  margin-bottom: -.4rem; /* tighten gap to crumbs below */
 }
 .parent-hint + .crumbs { padding-left: .6rem; }
 
@@ -58,6 +70,17 @@ body {
   font: inherit; font-size: .95em; cursor: pointer; line-height: 1;
 }
 .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Sidebar toggle: same chrome as the theme button, but anchored at the bar's
+   left edge — next to where the sidebar slides in (project-nav scope). */
+.sidebar-toggle {
+  flex-shrink: 0; align-self: flex-start;
+  min-width: 2.2em; padding: .25rem .4rem; text-align: center;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: transparent; color: var(--fg);
+  font: inherit; font-size: .95em; cursor: pointer; line-height: 1;
+}
+.sidebar-toggle:hover { border-color: var(--accent); color: var(--accent); }
 
 /* Segmented filter chips (class / hidden). One <button> per dimension; click
    cycles the aperture wider. Each stratum is a .seg showing its marginal file

@@ -15,6 +15,13 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
 
 ### Changed
 
+- Header layout restructured so DOM nesting mirrors scope (spec:
+  `specs/header-layout.md`). The sidebar `☰` toggle moves to the far left,
+  next to where the sidebar opens. A permanent `.browser` wrapper holds the
+  context path stacked over the breadcrumbs, and — **only in dir view** — a
+  second row with the filter, count, and class/hidden chips. Crumbs now get
+  the bar's full width, so deep paths stop wrapping against the filter row.
+  Document actions (Raw/Download/Edit) and the theme toggle stay on the right.
 - Access logging now defaults to `dot` (was `off`). In `dot` mode, primary
   page views mark `|` and internal `/_/` helper requests mark `.`, so the
   heartbeat shows page loads punctuating their sub-requests:

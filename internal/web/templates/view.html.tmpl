@@ -9,14 +9,16 @@
 </head>
 <body>
 <header class="bar">
-  {{template "crumbs" .}}
+  {{if .Palette}}<button id="sidebar-toggle" type="button" class="sidebar-toggle" title="file list (⌘K)">☰</button>{{end}}
+  <div class="browser">
+    {{template "crumbs" .}}
+  </div>
   <nav class="bar-actions">
     {{if .DiffURL}}<a href="{{.DiffURL}}">{{.DiffLabel}}</a>{{end}}
     {{if .ToggleURL}}<a href="{{.ToggleURL}}">{{.ToggleLabel}}</a>{{end}}
     <a href="{{.RawURL}}">Raw</a>
     <a href="{{.DownloadURL}}">Download</a>
     {{if .EditURL}}<a href="{{.EditURL}}">Edit</a>{{end}}
-    {{if .Palette}}<button id="sidebar-toggle" type="button" class="theme-toggle" title="file list (⌘K)">☰</button>{{end}}
     <button id="theme-toggle" type="button" class="theme-toggle">◐</button>
   </nav>
 </header>

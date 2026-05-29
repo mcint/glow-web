@@ -1,10 +1,12 @@
 {{define "crumbs"}}
-{{if .ParentHint}}<div class="parent-hint" aria-label="serving root context">{{.ParentHint}}/</div>{{end}}
-<nav class="crumbs" aria-label="path">
-  {{range $i, $c := .Crumbs}}
-    {{if $i}}<span class="crumb-sep">/</span>{{end}}
-    {{if $c.URL}}<a class="crumb" href="{{$c.URL}}">{{$c.Name}}</a>
-    {{else}}<span class="crumb crumb-current">{{$c.Name}}</span>{{end}}
-  {{end}}
-</nav>
+<div class="browser-loc">
+  {{if .ParentHint}}<div class="parent-hint" aria-label="serving root context">{{.ParentHint}}/</div>{{end}}
+  <nav class="crumbs" aria-label="path">
+    {{range $i, $c := .Crumbs}}
+      {{if $i}}<span class="crumb-sep">/</span>{{end}}
+      {{if $c.URL}}<a class="crumb" href="{{$c.URL}}">{{$c.Name}}</a>
+      {{else}}<span class="crumb crumb-current">{{$c.Name}}</span>{{end}}
+    {{end}}
+  </nav>
+</div>
 {{end}}

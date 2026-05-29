@@ -387,6 +387,42 @@ func TestIndex_CycleTogglesPresent(t *testing.T) {
 	}
 }
 
+func TestIndex_BrowserHeaderLayout(t *testing.T) {
+	_, s := dirFixture(t)
+	s.CommandPalette = true // sidebar toggle is gated on the palette being enabled
+	body := serve(s.Handler(), "GET", "/", "").Body.String()
+	for _, want := range []string{
+		`class="browser"`,          // permanent file-browser wrapper
+		`class="browser-loc"`,      // context path + crumbs, stacked
+		`class="browser-controls"`, // dir-view-only filters
+		`id="sidebar-toggle"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index header missing %q", want)
+		}
+	}
+	// Sidebar toggle sits left of (before) the browser wrapper in DOM order.
+	if i, j := strings.Index(body, `id="sidebar-toggle"`), strings.Index(body, `class="browser"`); i < 0 || j < 0 || i > j {
+		t.Errorf("sidebar toggle should precede the browser wrapper (i=%d j=%d)", i, j)
+	}
+	// The filter lives inside the browser-controls block, not bar-actions.
+	if bc, bf := strings.Index(body, `class="browser-controls"`), strings.Index(body, `id="index-filter"`); bc < 0 || bf < bc {
+		t.Errorf("index-filter should render inside browser-controls (bc=%d bf=%d)", bc, bf)
+	}
+}
+
+func TestView_BrowserHeaderNoDirControls(t *testing.T) {
+	_, s := dirFixture(t)
+	body := serve(s.Handler(), "GET", "/alpha.md", "").Body.String()
+	if !strings.Contains(body, `class="browser"`) {
+		t.Errorf("file view should still use the browser wrapper for crumbs")
+	}
+	// A file view is not a listing — no dir-only filter controls.
+	if strings.Contains(body, `class="browser-controls"`) {
+		t.Errorf("file view must not render browser-controls (dir-only)")
+	}
+}
+
 func TestLog_DotMarksPrimaryVsSecondary(t *testing.T) {
 	_, s := dirFixture(t)
 	var buf bytes.Buffer
