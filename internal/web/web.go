@@ -90,7 +90,7 @@ func (s *Server) Handler() http.Handler {
 	if s.URLPrefix != "" {
 		h = http.StripPrefix(s.URLPrefix, h)
 	}
-	return logMiddleware(s.LogLevel, s.LogOut, h)
+	return logMiddleware(s.LogLevel, s.LogOut, s.URLPrefix, h)
 }
 
 // Serve binds addr and blocks. Useful for the CLI; tests should use Handler().

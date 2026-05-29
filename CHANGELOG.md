@@ -9,10 +9,17 @@ While we're pre-1.0, minors are allowed to break things; patches will not.
 
 ## [Unreleased]
 
-Nothing merged yet. Freshness P1 (manual refresh + fresh/stale indicator)
-is spec'd in `specs/fresh-stale.md` but not yet implemented. A hover-expand
-variant of the segmented filter chips is queued (see
-`sessions/2026-05-28-requests.md`).
+Freshness P1 (manual refresh + fresh/stale indicator) is spec'd in
+`specs/fresh-stale.md` but not yet implemented. A hover-expand variant of the
+segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
+
+### Changed
+
+- Access logging now defaults to `dot` (was `off`). In `dot` mode, primary
+  page views mark `|` and internal `/_/` helper requests mark `.`, so the
+  heartbeat shows page loads punctuating their sub-requests:
+  `|.....|..|.......|..`. `--log-level=off` restores silence. Spec:
+  `specs/access-log.md`.
 
 ## [0.6.4] — 2026-05-28
 

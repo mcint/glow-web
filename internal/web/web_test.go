@@ -387,6 +387,20 @@ func TestIndex_CycleTogglesPresent(t *testing.T) {
 	}
 }
 
+func TestLog_DotMarksPrimaryVsSecondary(t *testing.T) {
+	_, s := dirFixture(t)
+	var buf bytes.Buffer
+	s.LogLevel = web.LogDot
+	s.LogOut = &buf
+	h := s.Handler()
+	// Primary page views mark "|"; internal /_/ helper requests mark ".".
+	serve(h, "GET", "/", "")        // index → primary
+	serve(h, "GET", "/_/files", "") // internal endpoint → secondary
+	if got := buf.String(); got != "|." {
+		t.Errorf("dot log: want %q, got %q", "|.", got)
+	}
+}
+
 func TestIndex_ToggleSegmentsWithCounts(t *testing.T) {
 	_, s := dirFixture(t)
 	rec := serve(s.Handler(), "GET", "/", "")
@@ -1167,11 +1181,11 @@ func TestAccessLog_DotPerRequestNoNewline(t *testing.T) {
 	var buf bytes.Buffer
 	s.LogLevel = web.LogDot
 	s.LogOut = &buf
-	serve(s.Handler(), "GET", "/alpha.md", "")
-	serve(s.Handler(), "GET", "/", "")
-	serve(s.Handler(), "GET", "/_/files", "")
-	if got := buf.String(); got != "..." {
-		t.Errorf("LogDot should write one '.' per request with no newline, got %q", got)
+	serve(s.Handler(), "GET", "/alpha.md", "") // primary → |
+	serve(s.Handler(), "GET", "/", "")         // primary → |
+	serve(s.Handler(), "GET", "/_/files", "")  // internal → .
+	if got := buf.String(); got != "||." {
+		t.Errorf("LogDot should write one mark per request (| primary, . internal) with no newline, got %q", got)
 	}
 }
 

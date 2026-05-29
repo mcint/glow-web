@@ -70,7 +70,7 @@ func runWeb(args []string) {
 	theme := fs.String("theme", "auto", "default theme: auto | light | dark (browser toggle overrides)")
 	titlePrefix := fs.String("title-prefix", "auto", `<title> rendered as "<doc> · <prefix>". "auto" expands to "glow-web[:port]"; "" disables; any other value passes through verbatim.`)
 	titlePrefixPort := fs.String("title-prefix-port", "auto", `port handling when --title-prefix=auto: "auto" (include if known), "never" (omit, useful behind a reverse proxy), "always".`)
-	logLevel := fs.String("log-level", "off", `per-request access log: "off" (silent, default), "dot" (one "." per request, no newline), "info" (one line: client method path status bytes duration).`)
+	logLevel := fs.String("log-level", "dot", `per-request access log: "dot" (default) marks "|" per primary page view and "." per internal request, e.g. "|.....|..|....."; "off" silent; "info" one line per request (client method path status bytes duration).`)
 	parseIntermixed(fs, args)
 	if fs.NArg() < 1 {
 		fmt.Fprintln(os.Stderr, "glow-web web: missing PATH (file or directory)")

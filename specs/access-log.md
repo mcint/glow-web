@@ -1,20 +1,36 @@
 # Access logging — `--log-level`
 
-The `web` server is silent by default (only the boot notice goes to stderr).
-`--log-level` opens a single per-request channel for users who want to *see*
-traffic — either as a terse heartbeat or as a structured line.
+The `web` server shows a terse per-request heartbeat by default (`dot`).
+`--log-level` tunes that single channel: silence it (`off`) or expand it to a
+structured line (`info`).
 
 ## Levels
 
 | Level   | What it writes per request                                | Use it for                                  |
 | ------- | --------------------------------------------------------- | ------------------------------------------- |
-| `off`   | nothing                                                   | default; quiet local reading                |
-| `dot`   | `.` (no newline)                                          | "is anything happening?" heartbeat          |
+| `off`   | nothing                                                   | quiet local reading                         |
+| `dot`   | `\|` for a primary page view, `.` otherwise (no newline)  | **default**; "is anything happening?" heartbeat |
 | `info`  | `<client> <method> <path> <status> <bytes> <duration>\n`  | debugging traffic, basic access-log shape   |
 
 `off`, `none`, `silent`, and the empty string are accepted as synonyms for
-disabling — the default flag value is `off` so unconfigured behavior is
-identical to pre-flag behavior.
+disabling.
+
+## `dot`: primary vs internal
+
+`dot` writes one character per request, so a stream of requests reads as a
+heartbeat. A request is **primary** — a top-level page view the user navigated
+to (index, rendered/text file view, raw/download) — or **internal**: a helper
+fetch under the reserved `/_/` namespace (`/_/files` for the palette, `/_/render`
+for the edit preview). Primary requests mark `|`; internal ones mark `.`, so a
+page load and its follow-on fetches punctuate visibly:
+
+```
+|.....|..|.......|..
+```
+
+Each `|` is a page the user opened; the `.`s after it are that page's internal
+chatter. The URL prefix (when mounted behind a proxy) is trimmed before the
+`/_/` test, so classification is identical with or without `--url-prefix`.
 
 ## Why three levels and not a count
 
@@ -58,16 +74,18 @@ inject a `*bytes.Buffer` to assert without racing against stderr.
 
 ## Implementation
 
-`logMiddleware(level, out, next)` lives in `internal/web/log.go` and is
-applied as the outermost wrapper in `Server.Handler()`. `LogOff`
+`logMiddleware(level, out, urlPrefix, next)` lives in `internal/web/log.go`
+and is applied as the outermost wrapper in `Server.Handler()`. `LogOff`
 short-circuits to return `next` unchanged so the no-log path has zero
 allocation overhead. The middleware sits *outside* `http.StripPrefix` so
 log lines show the externally-visible URL (with prefix), not the
-internally-rewritten one.
+internally-rewritten one. `isPrimaryRequest(r, urlPrefix)` trims the prefix
+and tests for the `/_/` namespace to pick the `|` vs `.` mark.
 
 ## Future axes
 
 - A `debug` level that adds `User-Agent` and referer.
-- Per-route filtering (suppress `/_/files` polling from the palette).
+- Carrying the primary/internal distinction into `info` too (e.g. a column or
+  a suppress-internal flag). `dot` already separates them via `|` vs `.`.
 - A `--log-format=common|combined|json` knob if `info` ever stops being
   enough — split format from level once the dimensions actually disagree.

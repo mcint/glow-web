@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -13,9 +14,23 @@ type LogLevel int
 
 const (
 	LogOff  LogLevel = iota // no per-request output
-	LogDot                  // a single "." per request, no newline; heartbeat mode
+	LogDot                  // one char per request: "|" for a primary page view, "." otherwise — a heartbeat that shows page loads punctuating their sub-requests, e.g. "|.....|..|....."
 	LogInfo                 // one line per request: client method path status bytes duration
 )
+
+// isPrimaryRequest reports whether a request is a top-level page view (a
+// navigation the user initiated) rather than an internal helper fetch. The
+// internal endpoints live under the "/_/" namespace (e.g. /_/files, /_/render);
+// everything else — index, rendered/text file views, raw/download — is primary.
+// The URL prefix (when mounted behind a proxy) is trimmed first so the "/_/"
+// test sees the internal path.
+func isPrimaryRequest(r *http.Request, urlPrefix string) bool {
+	path := r.URL.Path
+	if urlPrefix != "" {
+		path = strings.TrimPrefix(path, urlPrefix)
+	}
+	return !strings.HasPrefix(path, "/_/")
+}
 
 // ParseLogLevel maps the --log-level CLI value to a LogLevel. Empty / "off" /
 // "none" / "silent" all map to LogOff so the default and explicit-disable
@@ -60,7 +75,7 @@ func (r *respRecorder) Write(b []byte) (int, error) {
 // logMiddleware wraps next with per-request logging at the configured level.
 // LogOff returns next unchanged so there's zero overhead when logging is
 // disabled (the default).
-func logMiddleware(level LogLevel, out io.Writer, next http.Handler) http.Handler {
+func logMiddleware(level LogLevel, out io.Writer, urlPrefix string, next http.Handler) http.Handler {
 	if level == LogOff {
 		return next
 	}
@@ -71,7 +86,11 @@ func logMiddleware(level LogLevel, out io.Writer, next http.Handler) http.Handle
 		switch level {
 		case LogDot:
 			next.ServeHTTP(w, r)
-			_, _ = fmt.Fprint(out, ".")
+			mark := "."
+			if isPrimaryRequest(r, urlPrefix) {
+				mark = "|"
+			}
+			_, _ = fmt.Fprint(out, mark)
 		case LogInfo:
 			start := time.Now()
 			rec := &respRecorder{ResponseWriter: w}
