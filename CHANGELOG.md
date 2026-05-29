@@ -9,13 +9,35 @@ While we're pre-1.0, minors are allowed to break things; patches will not.
 
 ## [Unreleased]
 
+Nothing merged yet. Freshness P1 (manual refresh + fresh/stale indicator)
+is spec'd in `specs/fresh-stale.md` but not yet implemented. A hover-expand
+variant of the segmented filter chips is queued (see
+`sessions/2026-05-28-requests.md`).
+
+## [0.6.4] — 2026-05-28
+
+Versioning made real: one source, embedded at build, accurate everywhere.
+
+### Changed
+
+- The embedded version is injected at build time from `git describe`
+  (`make build` / `make install` pass
+  `-ldflags "-X …/internal/version.injected=$(git describe --tags --always --dirty)"`),
+  so a built binary reports its exact tag, commits-since, short-sha, and
+  `-dirty` state — in both `glow-web version` and the page footer. Plain
+  `go build` picks up Go's own VCS stamping; `go run` falls back to the
+  current dev line (`version.Fallback`). `internal/version.String()` stays
+  the single source every surface calls. Spec: `specs/versioning.md`.
+
+## [0.6.0] — 2026-05-28
+
+The "text, diffs, and logs" cut: glow-web views more than markdown, shows
+what changed on disk, and can narrate its own requests. (Patches v0.6.1–v0.6.3
+followed: the fzf matcher rewrite + segmented chips, session-request logs, and
+the freshness spec.)
+
 ### Added
 
-- Index page is now a sortable table with five columns: name, size,
-  mtime, git status (porcelain XY), and a ±N numstat for the diff
-  vs HEAD. Click any column header to cycle sort asc → desc →
-  default; sort state persists per-project in `localStorage`.
-  Spec: `specs/index-table-and-git.md`.
 - Text file viewing: `.go`, `.py`, `.toml`, `.txt` and other
   `"text"` class files are now viewable in the browser, rendered
   as `<pre>` with line numbers. `?raw=1` and `?download=1` work.
@@ -25,17 +47,17 @@ While we're pre-1.0, minors are allowed to break things; patches will not.
 - Inline diff view: "Diff" toggle in the file-view header bar
   shows `git diff HEAD` output with colored add/del/hunk spans.
   "View" returns to the normal render. Dir mode only.
+- `--log-level=off|dot|info` flag for per-request access logging.
+  Default `off` keeps the existing silent behavior; `dot` writes a
+  bare `.` per request (no newline) as a heartbeat; `info` writes one
+  line per request with client, method, path, status, bytes, and
+  duration. Spec: `specs/access-log.md`.
 - Sidebar: clickable × close button and ☰ header-bar toggle for
   environments where Esc is captured (e.g. Vimium).
-- fzf-style fuzzy matching in the sidebar palette and index
+- fzf-style fuzzy matching rewrite in the sidebar palette and index
   filter. Tries up to 32 start positions per token, tightens each
   window backwards, scores path-component-initial and contiguity.
-  Merged `<mark>` spans for contiguous character runs.
-- Parent-hint path displays above breadcrumbs on its own line;
-  breadcrumbs indent slightly from the context path.
-- Hidden/ignored rows get a subtle grey background tint when
-  exposed via the toggle. Untracked files (`??`) get accent
-  coloring on the git status cell.
+  Merged `<mark>` spans for contiguous character runs. (v0.6.1)
 - Segmented filter chips on the index. The class chip widens the
   listing `md` → `+text` → `+all`; the hidden chip widens `normal`
   → `+hidden` → `+ignored`. One click cycles the aperture; all three
@@ -43,25 +65,40 @@ While we're pre-1.0, minors are allowed to break things; patches will not.
   many more rows widening to it admits). Included strata are
   full-contrast, the rest desaturated. Counts are conditioned on the
   sibling chip, so a segment's number matches what it would reveal.
-  Persisted in `localStorage` under `index-class` / `index-hidden`.
+  Persisted in `localStorage` under `index-class` / `index-hidden`. (v0.6.1)
+
+## [0.5.0] — 2026-05-15
+
+The "index as a table" cut: the directory listing becomes a sortable,
+git-aware, filterable table. (Patches v0.4.1–v0.4.3 and v0.5.1–v0.5.5 carry
+the changelog catch-up, filter power, file-class toggles, git columns, ⌘K
+focus, and parent-hint placement.)
+
+### Added
+
+- Index page is now a sortable table with five columns: name, size,
+  mtime, git status (porcelain XY), and a ±N numstat for the diff
+  vs HEAD. Click any column header to cycle sort asc → desc →
+  default; sort state persists per-project in `localStorage`.
+  Spec: `specs/index-table-and-git.md`.
+- File-class + hidden/ignored cycle toggles on the index (precursor to the
+  v0.6.1 segmented chips). `walk.Options` gains `IncludeText`, `IncludeAll`,
+  `IncludeHidden`, `IncludeIgnored`; `walk.File` gains `Class`
+  (`md` / `text` / `other`), `Hidden`, and `Ignored`. `.git/` is always
+  pruned regardless of options.
 - Per-row git status when the served directory is a git repo:
   shells once to `git status --porcelain=v1 -z` and once to
   `git diff HEAD --numstat -z`. Missing `.git` or missing `git`
-  binary silently leaves the columns blank.
-- New `internal/gitstatus` package wraps the git invocations with
-  a 2s timeout and returns a `map[string]Entry` keyed by repo-
-  relative path.
-- `walk.Options` gains `IncludeText`, `IncludeAll`, `IncludeHidden`,
-  and `IncludeIgnored`. `walk.File` gains `Class` (`md` / `text` /
-  `other`), `Hidden`, and `Ignored` fields. `.git/` is always
-  pruned regardless of options.
-- `--log-level=off|dot|info` flag for per-request access logging.
-  Default `off` keeps the existing silent behavior; `dot` writes a
-  bare `.` per request (no newline) as a heartbeat; `info` writes one
-  line per request with client, method, path, status, bytes, and
-  duration. Spec: `specs/access-log.md`.
-- `/_/files` JSON entries now carry `mtime` (Unix seconds). Index
-  page `<li>` elements get `data-mtime` for the same reason.
+  binary silently leaves the columns blank. New `internal/gitstatus`
+  package wraps the invocations with a 2s timeout, keyed by
+  repo-relative path.
+- Hidden/ignored rows get a subtle grey background tint when
+  exposed via the toggle. Untracked files (`??`) get accent
+  coloring on the git status cell.
+- Parent-hint path displays above breadcrumbs on its own line;
+  breadcrumbs indent slightly from the context path.
+- `/_/files` JSON entries now carry `mtime` (Unix seconds); index rows
+  get `data-mtime` for the same reason.
 - Filter rendering shows a relative-time hint (`5m` / `3h` / `2d` /
   `4w` / …) next to each matched result in both the inline index
   filter and the ⌘K sidebar.
@@ -188,7 +225,10 @@ a complete shape.
   revision. Surfaces in the page footer + `glow-web version`.
 - `SPEC.md` (root, since moved to `specs/spec.md`) and `README.md`.
 
-[Unreleased]: https://github.com/mcint/glow-web/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/mcint/glow-web/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/mcint/glow-web/compare/v0.6.3...v0.6.4
+[0.6.0]: https://github.com/mcint/glow-web/compare/v0.5.5...v0.6.0
+[0.5.0]: https://github.com/mcint/glow-web/compare/v0.4.3...v0.5.0
 [0.4.0]: https://github.com/mcint/glow-web/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/mcint/glow-web/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mcint/glow-web/compare/v0.1.0...v0.2.0

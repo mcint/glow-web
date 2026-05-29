@@ -1,21 +1,38 @@
 // Package version reports the running glow-web build's version.
 //
-// The string surfaces the module version when the binary was built from a
-// tagged release; for `go build` / `go run` development builds it falls back
-// to a constant suffixed with the short VCS revision (and ".dirty" if the
-// working tree had uncommitted changes at build time).
+// It is the single, project-global source of truth for the version string:
+// the CLI banner, `glow-web version`, and the page footer (templates' .Version)
+// all call String(). New surfaces should call String() rather than re-deriving.
+//
+// Resolution order:
+//   - build-injected `git describe` (Makefile / release builds) — carries the
+//     nearest tag, commits-since, short-sha, and ".dirty";
+//   - the module version when built via `go install …@vX.Y.Z`;
+//   - a development fallback suffixed with the short VCS revision (and
+//     ".dirty") for plain `go build` / `go run`.
 package version
 
 import "runtime/debug"
 
-// Fallback is used when build info is unavailable or the module version is
-// the synthetic "(devel)" string that go injects for non-tagged builds.
-const Fallback = "v0.1.0-dev"
+// injected is the authoritative version when the binary was built through the
+// project build (Makefile / release), via
+//
+//	-ldflags "-X github.com/mcint/glow-web/internal/version.injected=$(git describe --tags --always --dirty)"
+//
+// e.g. "v0.6.4" on a tag or "v0.6.4-3-gabc1234-dirty" three commits later.
+// Empty for plain `go build` / `go run`, which fall back to the logic below.
+var injected string
 
-// String returns the human-facing version, e.g. "v0.1.0-dev+8e9359c.dirty"
-// for development builds, or the module version verbatim for tagged builds
-// (which already encodes pseudo-version + dirty when relevant).
+// Fallback is the development line shown for plain `go build` / `go run` builds
+// that carry neither an injected value nor a module version (go reports
+// "(devel)"). Bump on release so dev builds keep reporting the current minor.
+const Fallback = "v0.6.4-dev"
+
+// String returns the human-facing version (see package doc for resolution).
 func String() string {
+	if injected != "" {
+		return injected
+	}
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return Fallback

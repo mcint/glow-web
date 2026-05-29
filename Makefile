@@ -9,6 +9,13 @@ BIN      := $(BIN_DIR)/glow-web
 PKG      := ./...
 CMD      := ./cmd/glow-web
 
+# Single source of the embedded version: `git describe` → injected into the
+# version package at link time. Tagged builds report the tag exactly; builds
+# between tags report "<tag>-<n>-g<sha>" plus "-dirty" for an unclean tree.
+# Plain `go build` / `go run` (no ldflags) fall back to version.Fallback + VCS.
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null)
+LDFLAGS := -X github.com/mcint/glow-web/internal/version.injected=$(VERSION)
+
 # Default to building. `make` with no target runs the gate first, then build.
 .DEFAULT_GOAL := check
 
@@ -17,12 +24,12 @@ CMD      := ./cmd/glow-web
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-build: ## Build the binary into ./bin
+build: ## Build the binary into ./bin (embeds git-describe version)
 	@mkdir -p $(BIN_DIR)
-	go build -o $(BIN) $(CMD)
+	go build -ldflags "$(LDFLAGS)" -o $(BIN) $(CMD)
 
-install: ## go install into $GOBIN / $GOPATH/bin
-	go install $(CMD)
+install: ## go install into $GOBIN / $GOPATH/bin (embeds git-describe version)
+	go install -ldflags "$(LDFLAGS)" $(CMD)
 
 run: build ## Build and serve the project root on 127.0.0.1:8080
 	$(BIN) web . --addr 127.0.0.1:8080
