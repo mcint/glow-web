@@ -27,11 +27,11 @@ Click a `<th>` to cycle that column through asc → desc → default
 
 ### Two segmented toggles in the header bar
 
-Both toggles sit in `.bar-actions` and persist independently in
-`localStorage`. Each is a single `<button class="seg-toggle">` — one
-click still cycles the aperture wider (and wraps) — but instead of a
-one-word label it renders all three strata as `.seg` segments, each
-carrying a marginal file count:
+Both toggles sit in `.browser-controls` (the dir-view-only row inside the
+permanent browser wrapper — see `header-layout.md`) and persist independently
+in `localStorage`. Each is a single `<button class="seg-toggle">` — one
+click still cycles the aperture wider (and wraps) — rendering all three
+strata as `.seg` segments, each carrying a marginal file count:
 
 | Toggle  | Segments (aperture widens left → right)            | Key                |
 | ------- | -------------------------------------------------- | ------------------ |
@@ -39,12 +39,17 @@ carrying a marginal file count:
 | hidden  | `normal N` · `+hidden N` · `+ignored N`            | `K('index-hidden')`|
 
 The states are **cumulative apertures** (`md ⊆ text ⊆ all`;
-`normal ⊆ +hidden ⊆ +ignored`), so each strata's count is the
-*marginal* contribution — how many additional rows widening to that
-stratum admits. Segments at or below the current aperture get the
-`.is-on` class (full contrast); strata above it stay desaturated
-(`opacity` ~.38, lifting on hover so they stay readable before a click).
-The fill level reads as how far the aperture is open.
+`normal ⊆ +hidden ⊆ +ignored`), so each strata's count is the *marginal*
+contribution — how many additional rows widening to that stratum admits.
+
+**Selection is a single gestalt, not a contrast gradient.** At rest, *only the
+selected* stratum shows its name and carries a filled background
+(`.seg.is-current`, `background: var(--accent)`); the others show only their
+count. The JS marks exactly the current `.seg`; CSS hides the other
+`.seg-label`s. Hovering the chip reveals every name so you can see what a click
+would widen to. This replaced an earlier black-active / grey-inactive text
+scheme — in a 3-item control a contrast gradient reads poorly; a filled element
+reads at a glance. See `cc/design/gestalt-over-subtle-encoding.md`.
 
 The two dimensions are orthogonal in their row-hiding effect — CSS still
 hides rows whose `data-class` / `data-hidden` / `data-ignored` don't
@@ -60,9 +65,7 @@ directory's *shape* (a stable legend); the `N files` counter already
 reflects the live query. Prioritizes legibility + stability over
 per-keystroke accuracy during active filtering — the marginal accuracy
 lost there is recovered by the counter. (Reversal condition: if users
-read the chip counts as "matches", fold the query in.) Hover-to-expand a
-larger detail panel was considered and deferred — the always-visible
-compact counts cover the need.
+read the chip counts as "matches", fold the query in.)
 
 ### Git status columns
 

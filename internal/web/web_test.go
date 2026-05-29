@@ -453,6 +453,7 @@ func TestIndex_ToggleSegmentsWithCounts(t *testing.T) {
 		`class="seg" data-state="hidden"`,
 		`class="seg" data-state="ignored"`,
 		`class="seg-n"`,
+		`class="seg-label"`, // labels wrapped so only the selected one shows at rest
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("index page missing toggle-segment markup %q", want)

@@ -83,10 +83,11 @@ body {
 .sidebar-toggle:hover { border-color: var(--accent); color: var(--accent); }
 
 /* Segmented filter chips (class / hidden). One <button> per dimension; click
-   cycles the aperture wider. Each stratum is a .seg showing its marginal file
-   count. Strata at or below the current aperture are full-contrast (showing);
-   strata above it are desaturated (not currently shown) — the fill level reads
-   as how wide the aperture is open. */
+   cycles the aperture wider. Every .seg shows its marginal file count, but only
+   the SELECTED stratum shows its name and carries a filled background — one
+   clear gestalt for "which is active" in a small, low-sample control, instead
+   of asking the eye to compare relative text contrast. Hovering reveals all
+   names so you can see what a click would widen to. */
 .seg-toggle {
   display: inline-flex; align-items: stretch; padding: 0; overflow: hidden;
   border: 1px solid var(--border); border-radius: 4px;
@@ -95,15 +96,16 @@ body {
 }
 .seg-toggle:hover { border-color: var(--accent); }
 .seg-toggle .seg {
-  padding: .28rem .45rem; opacity: .38; white-space: nowrap;
-  border-right: 1px solid var(--border); transition: opacity .12s;
+  padding: .28rem .45rem; white-space: nowrap;
+  display: inline-flex; align-items: baseline; gap: .3em;
+  border-right: 1px solid var(--border);
 }
 .seg-toggle .seg:last-child { border-right: 0; }
-.seg-toggle .seg.is-on { opacity: 1; }
-.seg-toggle .seg-n { font-weight: 600; margin-left: .15em; }
-/* On hover, lift the dimmed strata enough to read before committing a click. */
-.seg-toggle:hover .seg { opacity: .65; }
-.seg-toggle:hover .seg.is-on { opacity: 1; }
+.seg-toggle .seg-label { display: none; }            /* hidden except on the selected seg / on hover */
+.seg-toggle .seg.is-current { background: var(--accent); color: var(--bg); }
+.seg-toggle .seg.is-current .seg-label { display: inline; }
+.seg-toggle:hover .seg-label { display: inline; }
+.seg-toggle .seg-n { font-weight: 600; }
 .bar-actions { display: flex; gap: .4rem; align-items: center; }
 .bar-actions a, .bar-actions button {
   padding: .25rem .65rem; border: 1px solid var(--border);

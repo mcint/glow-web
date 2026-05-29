@@ -15,6 +15,11 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
 
 ### Changed
 
+- Filter chips: only the **selected** stratum shows its name and carries a
+  filled background; the others show just their count, and hovering the chip
+  reveals all names. Replaces the black-active/grey-inactive text scheme — in a
+  3-item control a filled element reads at a glance where a contrast gradient
+  doesn't. (Principle: `cc/design/gestalt-over-subtle-encoding.md`.)
 - Header layout restructured so DOM nesting mirrors scope (spec:
   `specs/header-layout.md`). The sidebar `☰` toggle moves to the far left,
   next to where the sidebar opens. A permanent `.browser` wrapper holds the

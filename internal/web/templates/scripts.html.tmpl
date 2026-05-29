@@ -330,8 +330,8 @@ function K(suffix) { return KEY_PREFIX + suffix; }
   // ---- class + hidden segmented toggles (index page) ----
   // Each toggle is a 3-state cumulative aperture persisted in localStorage.
   // CSS keys off body[data-index-class] / body[data-index-hidden] to hide
-  // rows; the JS writes the body attr and lights up the .seg strata at or
-  // below the current aperture (the marginal counts are filled by rerender).
+  // rows; the JS writes the body attr and marks the selected .seg (which shows
+  // its name + a filled bg). Marginal counts are filled by rerender.
   function wireCycle(btnId, attrName, storageKey, order) {
     const btn = document.getElementById(btnId);
     if (!btn) return;
@@ -349,11 +349,10 @@ function K(suffix) { return KEY_PREFIX + suffix; }
     }
     function apply() {
       const v = get();
-      const cur = order.indexOf(v);
       document.body.setAttribute(attrName, v);
+      // Only the selected stratum is marked: it shows its name + a filled bg.
       btn.querySelectorAll('.seg').forEach(seg => {
-        const idx = order.indexOf(seg.dataset.state);
-        seg.classList.toggle('is-on', idx >= 0 && idx <= cur);
+        seg.classList.toggle('is-current', seg.dataset.state === v);
       });
       if (typeof window.__indexRerender === 'function') window.__indexRerender();
     }
