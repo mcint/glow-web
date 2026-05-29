@@ -21,10 +21,14 @@ body {
         "Helvetica Neue", Arial, sans-serif;
   min-height: 100vh; display: flex; flex-direction: column;
 }
+/* The bar is the project-context header: full width, pinned to the top, and
+   layered ABOVE the sidebar — the sidebar opens into the reading area beneath
+   it (see the .palette rules). */
 .bar {
   background: var(--bar-bg); border-bottom: 1px solid var(--border);
   padding: .55rem 1rem; display: flex; align-items: flex-start;
   gap: 1rem; flex-wrap: wrap;
+  position: sticky; top: 0; z-index: 1100;
 }
 .bar-actions { align-self: flex-start; }
 .bar-path {
@@ -268,7 +272,7 @@ mark { background: rgba(255, 215, 0, 0.45); color: inherit; padding: 0 .05em; bo
    leave the file list available while you read, so you can jump
    between files without re-opening anything. */
 .palette {
-  position: fixed; top: 0; left: 0; bottom: 0;
+  position: fixed; top: var(--bar-h, 0); left: 0; bottom: 0;
   width: min(20rem, 92vw);
   background: var(--bar-bg); border-right: 1px solid var(--border);
   z-index: 1000;
@@ -317,12 +321,18 @@ mark { background: rgba(255, 215, 0, 0.45); color: inherit; padding: 0 .05em; bo
 /* Sub-path coloring used by both the palette and the index inline filter */
 .path-dim { color: var(--muted); }
 
-/* When sidebar is pinned open, shift main content right so it doesn't
-   get covered. On narrow viewports the sidebar takes the whole screen
-   instead. */
+/* When the sidebar is pinned open, shift the reading content right so it
+   isn't covered — but the bar stays full-width (it's project context, above
+   the sidebar): it breaks back out of the body padding. On narrow viewports
+   the sidebar takes the whole screen below the bar and nothing shifts. */
 body.palette-open { padding-left: min(20rem, 92vw); transition: padding-left 0.18s ease; }
+body.palette-open > .bar {
+  margin-left: calc(-1 * min(20rem, 92vw));
+  width: calc(100% + min(20rem, 92vw));
+}
 @media (max-width: 700px) {
   body.palette-open { padding-left: 0; }
+  body.palette-open > .bar { margin-left: 0; width: 100%; }
   .palette { width: 100vw; box-shadow: none; }
 }
 

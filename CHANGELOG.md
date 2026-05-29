@@ -15,6 +15,11 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
 
 ### Changed
 
+- Sidebar now opens *beneath* the top bar, into the reading area, instead of
+  overlaying from the very top. The bar stays full-width above it as project
+  context (sticky, layered above; the sidebar anchors at `top: var(--bar-h)`).
+  Opening shifts the reading content right while the bar breaks out to full
+  width. Reinforces UI-nesting-mirrors-scope (`specs/header-layout.md`).
 - Filter chips: only the **selected** stratum shows its name and carries a
   filled background; the others show just their count, and hovering the chip
   reveals all names. Replaces the black-active/grey-inactive text scheme — in a

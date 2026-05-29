@@ -68,6 +68,18 @@ function K(suffix) { return KEY_PREFIX + suffix; }
 {{end}}
 <script>
 (function() {
+  // ---- publish bar height so the sidebar anchors right below it ----
+  // The bar is sticky/full-width project context; the sidebar (.palette) opens
+  // beneath it via top: var(--bar-h). Bar height varies (crumbs wrap, index
+  // controls), so keep it current on load + resize.
+  (function trackBarHeight() {
+    const bar = document.querySelector('.bar');
+    if (!bar) return;
+    const set = () => document.documentElement.style.setProperty('--bar-h', bar.offsetHeight + 'px');
+    set();
+    window.addEventListener('resize', set);
+  })();
+
   // ---- shared fuzzy match ----
   // fzf/skim-style scoring: tries multiple starting positions per token,
   // tightens each window backwards, keeps the best alignment. Lower = better.

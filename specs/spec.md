@@ -145,12 +145,14 @@ root, so two glow-web instances on the same browser origin (same
 The index-page knobs are documented in detail in
 [`index-table-and-git.md`](index-table-and-git.md).
 
-The sidebar is left-anchored, slides in over the page, and shifts main
-content right via a body class. It opens on ⌘K / Ctrl-K, closes on Esc
-or another ⌘K, and stays pinned across page navigations so jump-back-
-and-forth between files doesn't require re-summoning it. Scroll memory
-restores on load except when the URL carries a `#anchor` (anchor scroll
-wins).
+The sidebar is left-anchored and opens *beneath the top bar*, into the
+file-reading area — the bar stays full-width above it as project context
+(it anchors via `top: var(--bar-h)`, a height the script keeps current).
+Opening shifts the reading content right via a body class while the bar
+breaks back out to full width. It opens on ⌘K / Ctrl-K, closes on Esc or
+another ⌘K, and stays pinned across page navigations so jump-back-and-forth
+between files doesn't require re-summoning it. Scroll memory restores on load
+except when the URL carries a `#anchor` (anchor scroll wins).
 
 Both the sidebar palette and the index-page filter share a fuzzy matcher
 modelled on fzf / skim. Whitespace splits the query into ordered tokens;

@@ -411,6 +411,22 @@ func TestIndex_BrowserHeaderLayout(t *testing.T) {
 	}
 }
 
+func TestSidebar_AnchorsBelowBar(t *testing.T) {
+	_, s := dirFixture(t)
+	s.CommandPalette = true
+	body := serve(s.Handler(), "GET", "/", "").Body.String()
+	// The sidebar anchors below the bar via --bar-h, which the script publishes.
+	for _, want := range []string{
+		`top: var(--bar-h`, // .palette CSS anchors below the bar
+		`--bar-h`,          // script sets it from the bar's height
+		`position: sticky`, // bar is the pinned, full-width project context
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("sidebar-below-bar wiring missing %q", want)
+		}
+	}
+}
+
 func TestView_BrowserHeaderNoDirControls(t *testing.T) {
 	_, s := dirFixture(t)
 	body := serve(s.Handler(), "GET", "/alpha.md", "").Body.String()
