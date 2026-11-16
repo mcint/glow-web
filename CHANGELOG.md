@@ -63,6 +63,10 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
   is re-read on change and fails closed on a loose mode, a non-bcrypt hash
   or an empty file. Unix sockets stay ungated (mode 0600). A non-loopback
   bind warns about cleartext. Rung 9.
+- `web --hub=lease --readonly` is now read-only through the hub too: the
+  flag travels in the run record (`"readonly"`, an additive v1 field), and
+  the hub can only tighten with it. Before this, the lease was silently
+  writable.
 
 ### Build
 

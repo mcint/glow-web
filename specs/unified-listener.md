@@ -124,6 +124,18 @@ the hub stops serving it (a plain 404; the record is pruned on the next
 read, so there's no "last seen" to show) and the name is free again. The session process does nothing but hold the lock:
 no listener and no proxying, the narrowest path of all.
 
+- **Security-relevant session flags travel in the record.** Today that is
+  `readonly`: the hub serves a lease read-only if the hub *or* the record
+  says so, so a lease can tighten policy and never loosen it. Before this,
+  `web --hub=lease --readonly` was silently writable through the hub
+  (security review, 2026-11-16).
+- **Open (fork N6): hub-wide policy must not follow the election either.**
+  Pins and leases get the *hub process's* rendering flags, so `glow-web hub
+  --readonly` handing over to a plain session makes pins writable again.
+  This is the same class of bug auth had. The fix is the same shape: a
+  state-dir setting any hub honours (e.g. a `<state>/readonly` marker or a
+  small config file), with `hub --readonly` refused or ported to it. Not
+  built yet: it's a design decision.
 - Trade-off: the root is rendered by the **hub's** binary and default
   flags. Per-mount flags, if needed later, go in the record or in a
   `mounts/<name>.toml` beside a pin (**fork N2**: start without).

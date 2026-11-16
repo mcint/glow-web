@@ -23,12 +23,16 @@ const Contract = 1
 // its writer holds an flock on the file, so a crash releases it without
 // cleanup.
 type Record struct {
-	Contract int       `json:"contract"`
-	Name     string    `json:"name"`
-	Root     string    `json:"root"`
-	PID      int       `json:"pid"`
-	Version  string    `json:"version"`
-	Sock     string    `json:"sock,omitempty"` // proxy mode: socket file name in run/; empty = lease
+	Contract int    `json:"contract"`
+	Name     string `json:"name"`
+	Root     string `json:"root"`
+	PID      int    `json:"pid"`
+	Version  string `json:"version"`
+	Sock     string `json:"sock,omitempty"` // proxy mode: socket file name in run/; empty = lease
+	// ReadOnly carries the session's --readonly to a hub that renders a
+	// lease itself. It is additive (contract v1 minor): a hub can only add
+	// read-only from it, never drop it.
+	ReadOnly bool      `json:"readonly,omitempty"`
 	Started  time.Time `json:"started"`
 }
 

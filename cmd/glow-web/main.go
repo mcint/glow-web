@@ -123,7 +123,7 @@ func runWeb(args []string) {
 		if fs.NArg() > 1 {
 			die(fmt.Errorf("--hub=lease takes one PATH"))
 		}
-		runLease(fs.Arg(0), *name, el)
+		runLease(fs.Arg(0), *name, *sf.readonly, el)
 		return
 	case "proxy":
 		if fs.NArg() > 1 {

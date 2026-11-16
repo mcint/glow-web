@@ -1,6 +1,7 @@
 package hub_test
 
 import (
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -86,5 +87,38 @@ func TestLease_ShadowsPinOfSameRoot(t *testing.T) {
 		if m.Name == "beta" && m.Kind != "lease" {
 			t.Errorf("beta kind = %q, want lease", m.Kind)
 		}
+	}
+}
+
+// Security review (2026-11-16): a lease is rendered by the hub, so the
+// session's --readonly must travel in the record. The hub applies
+// readonly = hub's || record's: a lease can only tighten, never loosen.
+func TestLease_ReadOnlyTravelsInRecord(t *testing.T) {
+	f := setup(t)
+	root := mdRoot(t, "r.md", "# R\n")
+	lease, err := f.st.Register(registry.Record{Name: "ro", Root: root, ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Close()
+	req, _ := http.NewRequest("POST", "/ro/r.md", strings.NewReader("# overwritten\n"))
+	req.Host = "localhost"
+	if rec := serveReq(f.h.Handler(), req); rec.Code != 403 {
+		t.Errorf("save to a read-only lease = %d, want 403", rec.Code)
+	}
+	if b, _ := os.ReadFile(root + "/r.md"); string(b) != "# R\n" {
+		t.Fatalf("read-only lease was written: %q", b)
+	}
+	// The same root leased writable afterwards is writable: no stale cache.
+	lease.Close()
+	l2, err := f.st.Register(registry.Record{Name: "ro", Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l2.Close()
+	req, _ = http.NewRequest("POST", "/ro/r.md", strings.NewReader("# ok\n"))
+	req.Host = "localhost"
+	if rec := serveReq(f.h.Handler(), req); rec.Code != 204 {
+		t.Errorf("save to a writable lease = %d, want 204", rec.Code)
 	}
 }

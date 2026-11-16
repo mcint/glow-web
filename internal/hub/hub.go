@@ -39,6 +39,9 @@ type Mount struct {
 	// Contract is set for "incompatible" mounts: a record from a contract
 	// major this hub doesn't speak. Listed, never routed.
 	Contract int `json:"contract,omitempty"`
+	// ReadOnly is the session's --readonly (lease records). The hub
+	// serves the mount read-only if either side asks.
+	ReadOnly bool `json:"readonly,omitempty"`
 }
 
 // Hub routes /<name>/… to per-root servers.
@@ -87,7 +90,7 @@ func (h *Hub) Mounts() []Mount {
 			}
 			seen[r.Name] = true
 			out = append(out, Mount{Name: r.Name, Root: r.Root, Kind: r.Mode(), Live: true,
-				Version: r.Version, PID: r.PID, Sock: h.State.SockPath(r)})
+				Version: r.Version, PID: r.PID, Sock: h.State.SockPath(r), ReadOnly: r.ReadOnly})
 		}
 		pins, _ := h.State.Pins()
 		for _, p := range pins {
@@ -173,7 +176,7 @@ func (h *Hub) lookup(name string) (Mount, bool) {
 func (h *Hub) server(m Mount) (http.Handler, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	key := m.Kind + "|" + m.Root + "|" + m.Sock
+	key := fmt.Sprintf("%s|%s|%s|%t", m.Kind, m.Root, m.Sock, m.ReadOnly)
 	if c, ok := h.servers[m.Name]; ok && c.key == key {
 		return c.h, nil
 	}
@@ -195,6 +198,8 @@ func (h *Hub) server(m Mount) (http.Handler, error) {
 	if h.Configure != nil {
 		h.Configure(s)
 	}
+	// A lease can tighten the hub's policy, never loosen it.
+	s.ReadOnly = s.ReadOnly || m.ReadOnly
 	s.URLPrefix = h.URLPrefix + "/" + m.Name
 	s.HubURL = h.URLPrefix + "/"
 	c := cached{key: key, h: s.Handler()}

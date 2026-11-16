@@ -220,7 +220,7 @@ func serveEphemeral(h *hub.Hub, spec string, gate *auth.Gate) error {
 // runLease registers root with the hub as a lease (rung 4) and holds it
 // until SIGINT/SIGTERM: the hub serves root at /<name>/ exactly while this
 // process lives. Nothing is bound here.
-func runLease(root, name string, el *hub.Elector) {
+func runLease(root, name string, readOnly bool, el *hub.Elector) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		die(err)
@@ -232,7 +232,7 @@ func runLease(root, name string, el *hub.Elector) {
 		name = registry.NameFor(abs)
 	}
 	st := registry.DefaultState()
-	lease, err := st.Register(registry.Record{Name: name, Root: abs, Version: version.String()})
+	lease, err := st.Register(registry.Record{Name: name, Root: abs, Version: version.String(), ReadOnly: readOnly})
 	if err != nil {
 		die(err)
 	}
