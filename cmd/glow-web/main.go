@@ -14,7 +14,6 @@ import (
 	"github.com/mcint/glow-web/internal/render"
 	"github.com/mcint/glow-web/internal/slice"
 	"github.com/mcint/glow-web/internal/version"
-	"github.com/mcint/glow-web/internal/walk"
 	"github.com/mcint/glow-web/internal/web"
 )
 
@@ -24,7 +23,13 @@ usage: glow-web <command> [options] [path]
        glow-web --version
 
 commands:
-  web      serve a markdown file or directory as HTML
+  web      serve a markdown file or directory as HTML (several PATHs: one
+           port, each at /<name>/)
+  hub      serve every published dir at /<name>/ on one port (default
+           127.0.0.1:7171) and on <state>/run/hub.sock
+  publish  pin PATH to the hub at /<name>/ until unpublished
+  unpublish NAME   remove a pin (never touches the dir itself)
+  ls       list published mounts and whether the hub runs
   slice    extract a section by heading path
   render   render a markdown file to stdout (html | markup)
   name     print the mount name derived from PATH (default .)
@@ -44,6 +49,14 @@ func main() {
 	switch cmd {
 	case "web":
 		runWeb(args)
+	case "hub":
+		runHub(args)
+	case "publish":
+		runPublish(args)
+	case "unpublish":
+		runUnpublish(args)
+	case "ls":
+		runLs(args)
 	case "name":
 		runName(args)
 	case "slice":
@@ -68,52 +81,41 @@ func runWeb(args []string) {
 	addr := fs.String("addr", "127.0.0.1:8080", `address to listen on (default loopback only; use ":8080" or "0.0.0.0:8080" to expose on LAN)`)
 	listenSpec := fs.String("listen", "", `listen spec, overrides --addr: "tcp:HOST:PORT" or "unix:PATH" (socket mode 0600; a dead socket file is replaced, a live one is refused)`)
 	prefix := fs.String("url-prefix", "", `mount under URL prefix, e.g. "/docs"`)
-	gitignore := fs.Bool("gitignore", true, "honor .gitignore (dir mode); use --gitignore=false to disable")
-	ignoreFiles := fs.String("ignore-files", "", "comma-separated additional ignore-files (relative to PATH or absolute)")
-	readonly := fs.Bool("readonly", false, "disable the edit page and save endpoint")
-	markupDefault := fs.Bool("markup", false, "default to hybrid markup view (toggle with ?view=rendered)")
-	palette := fs.Bool("palette", true, "enable ⌘K / Ctrl-K command palette (use --palette=false to disable)")
-	theme := fs.String("theme", "auto", "default theme: auto | light | dark (browser toggle overrides)")
-	titlePrefix := fs.String("title-prefix", "auto", `<title> rendered as "<doc> · <prefix>". "auto" expands to "glow-web[:port]"; "" disables; any other value passes through verbatim.`)
-	titlePrefixPort := fs.String("title-prefix-port", "auto", `port handling when --title-prefix=auto: "auto" (include if known), "never" (omit, useful behind a reverse proxy), "always".`)
-	logLevel := fs.String("log-level", "dot", `per-request access log: "dot" (default) marks "|" per primary page view and "." per internal request, e.g. "|.....|..|....."; "off" silent; "info" one line per request (client method path status bytes duration).`)
+	sf := addServerFlags(fs)
 	parseIntermixed(fs, args)
 	if fs.NArg() < 1 {
 		fmt.Fprintln(os.Stderr, "glow-web web: missing PATH (file or directory)")
 		os.Exit(2)
 	}
-
-	walkOpts := walk.Options{
-		Gitignore: *gitignore,
-	}
-	if *ignoreFiles != "" {
-		for _, p := range strings.Split(*ignoreFiles, ",") {
-			if p = strings.TrimSpace(p); p != "" {
-				walkOpts.IgnoreFiles = append(walkOpts.IgnoreFiles, p)
-			}
-		}
-	}
-
-	s, err := web.NewServer(fs.Arg(0), walkOpts)
-	if err != nil {
-		die(err)
-	}
-	lvl, err := web.ParseLogLevel(*logLevel)
-	if err != nil {
-		die(err)
-	}
-	s.URLPrefix = normalizePrefix(*prefix)
-	s.ReadOnly = *readonly
-	s.DefaultMarkup = *markupDefault
-	s.CommandPalette = *palette
-	s.Theme = *theme
-	s.TitlePrefix = *titlePrefix
-	s.TitlePort = *titlePrefixPort
 	spec := *addr
 	if *listenSpec != "" {
 		spec = *listenSpec
 	}
-	s.LogLevel = lvl
+
+	// Several roots: an ephemeral hub over just these, each at /<name>/.
+	// It reads no registry and binds no hub.sock.
+	if fs.NArg() > 1 {
+		extra, err := argMounts(fs.Args())
+		if err != nil {
+			die(err)
+		}
+		h, err := newHub(nil, extra, *prefix, sf)
+		if err != nil {
+			die(err)
+		}
+		die(serveHub(h, spec, "", nil, ""))
+	}
+
+	s, err := web.NewServer(fs.Arg(0), sf.walk())
+	if err != nil {
+		die(err)
+	}
+	cfg, err := sf.apply(false)
+	if err != nil {
+		die(err)
+	}
+	cfg(s)
+	s.URLPrefix = normalizePrefix(*prefix)
 	if err := s.Serve(spec); err != nil {
 		die(err)
 	}

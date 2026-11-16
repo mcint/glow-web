@@ -2,7 +2,7 @@
 title: Unified listener — many glow-web projects on one host port, under /<name>/
 date: 2026-11-15
 kind: draft-spec
-status: draft — proposals with open forks; nothing implemented
+status: accepted; building rung by rung (see §8 Status)
 relates:
   - ../docs/research/2026-11-15-unified-listener-prior-art.md (prior art, full report)
   - ~/dev-llm/lmux/docs/specs/socket-auto-serve.md (dir-of-sockets convention, lmux side)
@@ -328,6 +328,13 @@ being *merged*, never on future ones.
 | 7 | **D** first listener wins | two in-process "sessions": the first binds, the second registers; kill the first → the second takes the port and serves both from disk | two terminals, kill the first, reload the bookmark |
 | 8 | **E** lmux front (lmux repo; glow-web unchanged) | lmux route test against a stub `hub.sock` | `open https://docs.lmux.test/` matches `:7171/` link for link |
 | 9 | **auth** (§6) | 401 without creds, 200 with; one realm; applies to every mount kind | `--auth-htpasswd FILE` |
+
+**Status** (2026-11-16): rung 1 done (`--listen`), rung 2 done (`glow-web
+name`), rung 3 done (`hub`, `publish`/`unpublish`/`ls`, ephemeral
+`web a/ b/`). Decided while building: N1 = refuse and name the holder; N7 =
+7171. The registry is re-read per request (one ReadDir), not on an mtime
+check: simpler, and correct when a pin's target disappears. Under a hub,
+`--title-prefix` defaults to the mount name.
 
 Rungs 3–4 and 5 are independent once 2 lands. Rung 6 needs 4 and 5.
 Rung 7 needs 3. Rung 8 needs 3 (the hub on `hub.sock`); before that,

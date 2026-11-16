@@ -22,6 +22,15 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
   proxy by socket path.
 - `glow-web name [PATH]` prints the mount name for a root: lmux's
   `kebab(basename)`, made URL-safe (`specs/unified-listener.md` §3, rung 2).
+- `glow-web hub` serves every published dir at `/<name>/` on one port
+  (default `127.0.0.1:7171`) and on `<state>/run/hub.sock`. It has an index
+  at `/` and JSON status at `/_/hub`, and checks the Host header on TCP (a
+  DNS-rebinding guard; `--allow-host` adds names). `publish PATH [--name]`,
+  `unpublish NAME` and `ls` manage pins: symlinks in
+  `~/.local/state/glow-web/mounts/` (`$GLOW_WEB_STATE_DIR` or
+  `$XDG_STATE_HOME` override it). Changes apply without a hub restart.
+  `glow-web web a/ b/` with several paths runs an ephemeral hub over just
+  those. Rung 3 (B1).
 
 ### Changed
 
