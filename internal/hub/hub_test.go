@@ -39,7 +39,14 @@ type fixture struct {
 
 func setup(t *testing.T) fixture {
 	t.Helper()
-	st := registry.State{Dir: filepath.Join(t.TempDir(), "gw")}
+	// Short path: unix sockets live under run/, and t.TempDir() on macOS
+	// (/var/folders/…) exceeds the 104-byte sun_path limit.
+	d, err := os.MkdirTemp("/tmp", "gwhub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(d) })
+	st := registry.State{Dir: filepath.Join(d, "gw")}
 	if err := st.Ensure(); err != nil {
 		t.Fatal(err)
 	}
@@ -178,4 +185,10 @@ func TestHostCheck(t *testing.T) {
 	if rec := get(allowed, "docs.lmux.test", "/"); rec.Code != 200 {
 		t.Errorf("allow-listed host = %d", rec.Code)
 	}
+}
+
+func serveReq(h http.Handler, req *http.Request) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
 }

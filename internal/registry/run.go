@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"sort"
@@ -48,6 +49,19 @@ func (s State) SockPath(r Record) string {
 		return ""
 	}
 	return filepath.Join(s.RunDir(), filepath.Base(r.Sock))
+}
+
+// SockName is the socket file name for name in run/: "<name>.sock" when
+// the full path fits macOS's 104-byte sun_path, else "<fnv32a(name)>.sock".
+// The record's Sock field carries whichever was used.
+func (s State) SockName(name string) string {
+	plain := name + ".sock"
+	if len(filepath.Join(s.RunDir(), plain)) <= 103 {
+		return plain
+	}
+	h := fnv.New32a()
+	h.Write([]byte(name))
+	return fmt.Sprintf("%08x.sock", h.Sum32())
 }
 
 // Lease is a held registration. Close releases it and removes the record

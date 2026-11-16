@@ -20,6 +20,7 @@ import (
 	"github.com/mcint/glow-web/internal/listen"
 	"github.com/mcint/glow-web/internal/registry"
 	"github.com/mcint/glow-web/internal/version"
+	"github.com/mcint/glow-web/internal/web"
 )
 
 // DefaultHubAddr is the hub's TCP listener (fork N7 in
@@ -126,19 +127,80 @@ func runLease(root, name string) {
 		die(err)
 	}
 	fmt.Fprintf(os.Stderr, "glow-web %s — leased %s as %q (served by the hub while this runs; Ctrl-C to release)\n", version.String(), abs, name)
-	if u := hubURL(st); u != "" {
-		fmt.Fprintf(os.Stderr, "    %s/%s/\n", u, name)
-	} else {
-		fmt.Fprintf(os.Stderr, "    no hub running yet: start `glow-web hub` (the lease is already registered)\n")
-	}
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	<-sig
+	printHubURL(st, name)
+	waitForSignal()
 	lease.Close()
 }
 
-// hubURL asks a running hub (over run/hub.sock) for its public URL.
-func hubURL(st registry.State) string {
+// runProxy serves root itself on run/<name>.sock and registers it, so the
+// hub forwards /<name>/ here verbatim (rung 5). The session keeps its own
+// binary and flags, e.g. glow-web-dev beside a stable hub.
+func runProxy(root, name string, sf *serverFlags) {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		die(err)
+	}
+	if name == "" {
+		name = registry.NameFor(abs)
+	}
+	if err := registry.ValidName(name); err != nil {
+		die(err)
+	}
+	st := registry.DefaultState()
+	if err := st.Ensure(); err != nil {
+		die(err)
+	}
+	s, err := web.NewServer(abs, sf.walk())
+	if err != nil {
+		die(err)
+	}
+	s.TitlePrefix = name
+	cfg, err := sf.apply(true)
+	if err != nil {
+		die(err)
+	}
+	cfg(s)
+	// The instance must know its full public prefix: the hub's (if it
+	// runs under one) + /<name>. Read from the hub, never from a header.
+	hubPrefix := ""
+	if hs, ok := hubStatus(st); ok {
+		hubPrefix = hs.Prefix
+	}
+	s.URLPrefix = hubPrefix + "/" + name
+
+	sockName := st.SockName(name)
+	ln, err := listen.Listen("unix:" + filepath.Join(st.RunDir(), sockName))
+	if err != nil {
+		die(err)
+	}
+	lease, err := st.Register(registry.Record{Name: name, Root: abs, Version: version.String(), Sock: sockName})
+	if err != nil {
+		ln.Close()
+		die(err)
+	}
+	go func() { die(s.ServeListener(ln)) }()
+	printHubURL(st, name)
+	waitForSignal()
+	lease.Close()
+	ln.Close()
+}
+
+func printHubURL(st registry.State, name string) {
+	if hs, ok := hubStatus(st); ok && hs.URL != "" {
+		fmt.Fprintf(os.Stderr, "    %s/%s/\n", hs.URL, name)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "    no hub running yet: start `glow-web hub` (this session is already registered)\n")
+}
+
+func waitForSignal() {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	<-sig
+}
+
+// hubStatus asks a running hub, over run/hub.sock, for its /_/hub status.
+func hubStatus(st registry.State) (hub.Status, bool) {
 	sock := filepath.Join(st.RunDir(), "hub.sock")
 	c := &http.Client{Timeout: time.Second, Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -148,14 +210,14 @@ func hubURL(st registry.State) string {
 	}}
 	resp, err := c.Get("http://hub/_/hub")
 	if err != nil {
-		return ""
+		return hub.Status{}, false
 	}
 	defer resp.Body.Close()
 	var s hub.Status
 	if json.NewDecoder(resp.Body).Decode(&s) != nil || s.Hub != "glow-web" {
-		return ""
+		return hub.Status{}, false
 	}
-	return s.URL
+	return s, true
 }
 
 // argMounts names positional roots with NameFor, refusing duplicates.

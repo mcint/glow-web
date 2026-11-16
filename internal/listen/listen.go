@@ -20,6 +20,10 @@ import (
 	"time"
 )
 
+// MaxSockPath is the longest unix socket path accepted: macOS's sun_path is
+// 104 bytes including the trailing NUL (Linux allows 108).
+const MaxSockPath = 103
+
 // Parse splits a spec into a net.Listen network and address.
 func Parse(spec string) (network, address string, err error) {
 	switch {
@@ -58,6 +62,9 @@ func Listen(spec string) (net.Listener, error) {
 	}
 	if network == "tcp" {
 		return net.Listen("tcp", address)
+	}
+	if len(address) > MaxSockPath {
+		return nil, fmt.Errorf("listen unix:%s: socket path too long (%d bytes; the macOS limit is %d). Use a shorter path or GLOW_WEB_STATE_DIR", address, len(address), MaxSockPath)
 	}
 	if err := clearStale(address); err != nil {
 		return nil, err

@@ -9,10 +9,13 @@
 package hub
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"sort"
 	"strings"
 	"sync"
@@ -32,6 +35,7 @@ type Mount struct {
 	// Session details for run-record mounts.
 	Version string `json:"version,omitempty"`
 	PID     int    `json:"pid,omitempty"`
+	Sock    string `json:"sock,omitempty"` // proxy mounts: the session's socket
 }
 
 // Hub routes /<name>/… to per-root servers.
@@ -52,8 +56,8 @@ type Hub struct {
 }
 
 type cached struct {
-	root string
-	h    http.Handler
+	key string // kind|root|sock: a change rebuilds the handler
+	h   http.Handler
 }
 
 // Mounts returns the current mount table: Extra first, then pins whose
@@ -74,11 +78,12 @@ func (h *Hub) Mounts() []Mount {
 		// record whose name a pin holds for another root, so a record
 		// here shadows only a pin of the same root.
 		for _, r := range h.State.Records() {
-			if seen[r.Name] || !r.Usable() || r.Mode() != "lease" {
+			if seen[r.Name] || !r.Usable() {
 				continue
 			}
 			seen[r.Name] = true
-			out = append(out, Mount{Name: r.Name, Root: r.Root, Kind: "lease", Live: true, Version: r.Version, PID: r.PID})
+			out = append(out, Mount{Name: r.Name, Root: r.Root, Kind: r.Mode(), Live: true,
+				Version: r.Version, PID: r.PID, Sock: h.State.SockPath(r)})
 		}
 		pins, _ := h.State.Pins()
 		for _, p := range pins {
@@ -149,7 +154,16 @@ func (h *Hub) lookup(name string) (Mount, bool) {
 func (h *Hub) server(m Mount) (http.Handler, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if c, ok := h.servers[m.Name]; ok && c.root == m.Root {
+	key := m.Kind + "|" + m.Root + "|" + m.Sock
+	if c, ok := h.servers[m.Name]; ok && c.key == key {
+		return c.h, nil
+	}
+	if h.servers == nil {
+		h.servers = map[string]cached{}
+	}
+	if m.Kind == "proxy" {
+		c := cached{key: key, h: proxyTo(m)}
+		h.servers[m.Name] = c
 		return c.h, nil
 	}
 	s, err := web.NewServer(m.Root, h.Walk)
@@ -163,12 +177,35 @@ func (h *Hub) server(m Mount) (http.Handler, error) {
 		h.Configure(s)
 	}
 	s.URLPrefix = h.URLPrefix + "/" + m.Name
-	if h.servers == nil {
-		h.servers = map[string]cached{}
-	}
-	c := cached{root: m.Root, h: s.Handler()}
+	c := cached{key: key, h: s.Handler()}
 	h.servers[m.Name] = c
 	return c.h, nil
+}
+
+// proxyTo forwards to a session's unix socket verbatim (rung 5): path
+// unstripped (the session knows its prefix), query, Host, headers and body
+// as received. Only hop-by-hop headers are dropped, by the stdlib.
+// FlushInterval -1 streams, ready for SSE or live reload.
+func proxyTo(m Mount) http.Handler {
+	sock := m.Sock
+	return &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.Out.URL.Scheme = "http"
+			pr.Out.URL.Host = "glow-web-session"
+			pr.Out.Host = pr.In.Host
+		},
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", sock)
+			},
+		},
+		FlushInterval: -1,
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+			http.Error(w, fmt.Sprintf("glow-web hub: %s (%s, pid %d) isn't answering on its socket: %v",
+				m.Name, m.Root, m.PID, err), http.StatusBadGateway)
+		},
+	}
 }
 
 // Status is the /_/hub JSON body; `glow-web web` probes it to tell a

@@ -36,6 +36,12 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
   `run/<name>.json`, so even `kill -9` releases it). `glow-web ls` lists
   leases with their pid. The hub's `/_/hub` now reports its `url`.
   Rung 4 (B2).
+- `glow-web web PATH --hub=proxy [--name NAME]` serves PATH on its own
+  `run/<name>.sock` with its own binary and flags. The hub forwards
+  `/<name>/…` to it unchanged (path, query, Host, headers, body). If the
+  session dies, the URL is a 404; if its socket hangs, a 502 names the root.
+  `--listen unix:` now explains an over-long socket path instead of
+  failing with "invalid argument". Rung 5 (C).
 
 ### Security
 

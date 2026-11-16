@@ -139,8 +139,10 @@ no listener and no proxying, the narrowest path of all.
 The hub routes `/<name>/…` to `httputil.ReverseProxy` over a unix
 `DialContext`, with the **path unstripped and no body or header
 rewriting** beyond the stdlib's hop-by-hop handling. Liveness is the
-flock plus the socket connecting. On failure the hub returns a 502 card
-naming the root and prunes the entry. Use proxy when the session must
+flock: a dead process's record (and socket) is pruned on the next read,
+so its URL is a 404. A live record whose socket stops answering gets a
+502 naming the root and pid, and is left in place: the lock says the
+process is still alive. Use proxy when the session must
 keep its own binary or flags (e.g. `glow-web-dev` while hacking
 glow-web itself) and for any version skew (§4.V).
 
@@ -340,7 +342,12 @@ name`), rung 3 done (`hub`, `publish`/`unpublish`/`ls`, ephemeral
 `web a/ b/`), rung 4 done (`web --hub=lease [--name]`; run records are
 written under a hidden temp name, flocked, then `link()`ed into place, so
 none is ever visible unlocked and two registrants can't overwrite each other;
-crash-tested with a SIGKILLed child). Decided while building: N1 = refuse and name the holder; N7 =
+crash-tested with a SIGKILLed child), rung 5 done (`web --hub=proxy`: the
+session binds `run/<name>.sock` *before* registering, so the hub never sees
+a record without a socket. It reads the hub's prefix from `/_/hub` over
+`hub.sock` and never from a header. The proxy keeps Host, path, query,
+headers and body. The CSRF gate runs in the session, so it holds through
+the proxy). Decided while building: N1 = refuse and name the holder; N7 =
 7171. The registry is re-read per request (one ReadDir), not on an mtime
 check: simpler, and correct when a pin's target disappears. Under a hub,
 `--title-prefix` defaults to the mount name.

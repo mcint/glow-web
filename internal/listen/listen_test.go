@@ -143,6 +143,14 @@ func TestUnix_RegularFileNeverDeleted(t *testing.T) {
 	}
 }
 
+func TestUnix_TooLongPathExplained(t *testing.T) {
+	p := "/tmp/" + strings.Repeat("x", 120) + ".sock"
+	_, err := listen.Listen("unix:" + p)
+	if err == nil || !strings.Contains(err.Error(), "too long") {
+		t.Fatalf("err = %v, want 'too long'", err)
+	}
+}
+
 func TestTCP_Listens(t *testing.T) {
 	ln, err := listen.Listen("tcp:127.0.0.1:0")
 	if err != nil {
