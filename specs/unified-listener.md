@@ -48,7 +48,11 @@ still working with no daemon at all.
 
 - Default name = lmux's rule: `kebab(basename(root))` (CamelCase →
   kebab, lowercase, collapse `-`). `ClaudeCollab` → `claude-collab`.
-  Same project, same name in glow-web and in lmux.
+  Same project, same name in glow-web and in lmux (golden-tested against
+  lmux's output). Where lmux's slug isn't a valid URL segment (`.claude`,
+  `Foo Bar`), glow-web maps other characters to `-`, trims leading
+  `._-` and caps the result at 63 chars; with nothing left, the name is
+  `root`. `glow-web name [PATH]` prints it.
 - Override: `--name NAME` / `GLOW_WEB_NAME`. Validated
   `^[a-z0-9][a-z0-9._-]{0,62}$` — never a `/`, never `..`, never `_`
   first (reserves `/_/` for the hub's own routes).
@@ -316,7 +320,7 @@ being *merged*, never on future ones.
 | # | rung | red tests first | manual validation |
 |---|---|---|---|
 | 1 | **A** `--listen unix:` | serve on a temp socket; GET via a unix-dial client; stale socket replaced only when dead; perms 0600 | `glow-web web . --listen unix:/tmp/g.sock & curl --unix-socket /tmp/g.sock http://x/` |
-| 2 | **names** (§3) | kebab rule matches lmux's `_kebab` on a fixture list; invalid names rejected; `_` reserved | `glow-web web ~/dev-llm/ClaudeCollab --print-name` → `claude-collab` |
+| 2 | **names** (§3) | kebab rule matches lmux's `_kebab` on a fixture list; invalid names rejected; `_` reserved | `glow-web name ~/dev-llm/ClaudeCollab` → `claude-collab` |
 | 3 | **B1** hub + pinned mounts + `publish/unpublish/ls` | two temp roots, index lists both, `/<a>/` links carry `/<a>`; unpublish → 404; dir perms enforced; Host check | `glow-web publish ~/notes; glow-web hub; open :7171/` |
 | 4 | **B2** lease | flock held → served; process killed → 404 + pruned; record shadows pin | `glow-web web . --hub=lease`, Ctrl-C, reload |
 | 5 | **C** proxy | fake backend echoes path/headers/body: verbatim; dead sock → 502 + pruned | `glow-web web . --hub=proxy`; `curl -i :7171/<name>/` |

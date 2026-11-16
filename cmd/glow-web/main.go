@@ -7,8 +7,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/mcint/glow-web/internal/registry"
 	"github.com/mcint/glow-web/internal/render"
 	"github.com/mcint/glow-web/internal/slice"
 	"github.com/mcint/glow-web/internal/version"
@@ -25,6 +27,7 @@ commands:
   web      serve a markdown file or directory as HTML
   slice    extract a section by heading path
   render   render a markdown file to stdout (html | markup)
+  name     print the mount name derived from PATH (default .)
   tui      open the markdown file in a terminal UI (stub in v0)
   version  print the build version
   help     print this message
@@ -41,6 +44,8 @@ func main() {
 	switch cmd {
 	case "web":
 		runWeb(args)
+	case "name":
+		runName(args)
 	case "slice":
 		runSlice(args)
 	case "render":
@@ -112,6 +117,22 @@ func runWeb(args []string) {
 	if err := s.Serve(spec); err != nil {
 		die(err)
 	}
+}
+
+// runName prints the name a root mounts under: lmux's kebab(basename),
+// made URL-safe (specs/unified-listener.md §3).
+func runName(args []string) {
+	fs := flag.NewFlagSet("name", flag.ExitOnError)
+	parseIntermixed(fs, args)
+	root := "."
+	if fs.NArg() > 0 {
+		root = fs.Arg(0)
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		die(err)
+	}
+	fmt.Println(registry.NameFor(abs))
 }
 
 func runSlice(args []string) {

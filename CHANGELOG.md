@@ -20,6 +20,8 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
   replaced; a live one is refused; a non-socket file is never removed.
   This is rung A of `specs/unified-listener.md`, and it lets lmux/Caddy
   proxy by socket path.
+- `glow-web name [PATH]` prints the mount name for a root: lmux's
+  `kebab(basename)`, made URL-safe (`specs/unified-listener.md` §3, rung 2).
 
 ### Changed
 
