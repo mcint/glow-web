@@ -10,14 +10,16 @@ relates:
   - ./spec.md § Browser-local UI state (KeyPrefix — already origin-share-safe)
   - ../sessions/2026-05-18-requests.md (GLOW_WEB_URL_PREFIX env; refuse X-Forwarded-Prefix)
 tldr: >
-  Today every glow-web is its own TCP port. Proposal ladder, each rung
-  useful alone: (A) `--listen unix:PATH`; (B) `glow-web hub` serving many
-  roots in-process at /<name>/, fed by a registry dir of symlinks
-  ("publish a directory" = `ln -s`); (C) session instances register a
-  socket in that same dir and the hub proxies /<name>/ to it, verbatim;
-  (D) first-listener-wins — cheap because the registry is on disk and
-  the router keeps no state of its own; (E) lmux mounts the hub once. Recommended: A → B → C → D,
-  with E as one lmux route. Basic auth is one hub middleware, later.
+  Today every glow-web is its own TCP port. A ladder of rungs, each
+  implemented and tested alone: (A) `--listen unix:`; names = lmux's
+  kebab(basename); (B1) `glow-web hub` serving pinned mounts (symlinks in
+  ~/.config/glow-web/mounts); (B2) lease mode: the hub serves a root only
+  while that dir's process holds an flock on its run record; (C) proxy
+  mode: the session serves its own socket and the hub forwards verbatim;
+  (V) a tiny versioned record contract so the hub proxies across
+  glow-web version skew and either side upgrades alone; (D) first
+  listener wins over the on-disk registry; (E) lmux as an optional
+  TLS/DNS front to the hub's socket (glow-web never depends on it); auth last.
 ---
 
 # Unified listener
@@ -77,70 +79,118 @@ Each is a rung: shippable alone, and the next one builds on it.
   spec, and everything below. ~40 lines + tests.
 - Cost: none to standalone users.
 
-### B. `glow-web hub` — many roots, one process, registry dir
+### B. `glow-web hub` — many roots, one process, two registration modes
 
 ```
-glow-web hub [--addr 127.0.0.1:7171] [--registry DIR]
+glow-web hub [--addr 127.0.0.1:7171]
 glow-web web a/ b/ c/                # sugar: ephemeral hub over these roots
 ```
 
-The hub mounts one `Server` per root at `/<name>/` in one process and
-serves `/` as an index of mounts (name, root, kind, live). Mounts come
-from flags **and** a registry directory (default
-`~/.local/state/glow-web/mounts/`, 0700), re-read on each index request
-and on a cheap mtime check (no fsnotify dep needed at first):
+The hub mounts roots at `/<name>/` and serves `/` as an index (name,
+root, mode, version, live). It reads two places (§7): **`mounts/`** in
+config, which holds what you meant to keep, and **`run/`** in state,
+which holds what is alive right now. It re-reads them on each index
+request and on a cheap mtime check, so no fsnotify dep is needed at
+first.
+
+#### B1. Pinned: serves until you unpublish
 
 ```
-mounts/
-  glow-web      -> /Users/me/dev-llm/glow-web        # symlink = pinned mount
+~/.config/glow-web/mounts/
+  notes         -> /Users/me/notes
   claude-collab -> /Users/me/dev-llm/ClaudeCollab
 ```
 
-"Publish a directory" is `ln -s ~/notes ~/.local/state/glow-web/mounts/notes`
-(or `glow-web publish ~/notes [--name notes]`, `glow-web unpublish notes`,
-`glow-web ls` — verbs and their inverses, thin wrappers over `ln`/`rm`/`ls`).
-It survives the session that made it — the "host-local glow-web keeps
-serving it" mode. Prior art: pow/puma-dev `~/.pow` symlinks, Valet `link`.
+`glow-web publish ~/notes [--name notes]`, `glow-web unpublish notes`
+and `glow-web ls` are verbs, each with an inverse, and thin wrappers
+over `ln -s`, `rm` and `ls`. A pinned mount survives the session that
+made it (pow `~/.pow`, Valet `link`, `tailscale serve --bg`). It lives
+in **config** because it is user-authored intent: dotfile-syncable,
+readable, never auto-pruned.
 
-- No IPC, no proxying: narrowest possible path.
-- Trade-off: every pinned mount runs the hub's binary and flags (one
-  version, one `--read-only` policy). Per-mount flags, if ever needed,
-  go in an optional `mounts/<name>.toml` beside the link — **fork N2**:
-  start without.
+#### B2. Lease: served by the hub only while the dir's process is open
 
-### C. Session instances register a socket; hub proxies verbatim
+`glow-web web . --hub=lease` binds no port. It writes
+`run/<name>.json` (§4.V record) and holds an `flock` on it for as long
+as it runs. The hub serves that root **in-process** while the lock is
+held. When the process exits or crashes, the kernel drops the lock and
+the hub stops serving it (404 with "not open — last seen <time>"), then
+prunes the record. The session process does nothing but hold the lock:
+no listener and no proxying, the narrowest path of all.
 
-A plain `glow-web web .` that finds a hub (registry dir has
-`_hub.sock` that connects) does instead of binding a TCP port:
+- Trade-off: the root is rendered by the **hub's** binary and default
+  flags. Per-mount flags, if needed later, go in the record or in a
+  `mounts/<name>.toml` beside a pin (**fork N2**: start without).
 
-1. listen on `unix:$RUNTIME/glow-web/<name>.sock` with
-   `--url-prefix /<name>` (A);
-2. drop `mounts/<name>.sock` → that socket (symlink, or the socket
-   itself if `$RUNTIME` = registry dir);
-3. print `http://127.0.0.1:7171/<name>/` as its URL.
+### C. Proxy: the session serves itself, the hub forwards verbatim
+
+`glow-web web . --hub=proxy`:
+
+1. listens on `unix:run/<name>.sock` with `--url-prefix /<name>` (A);
+2. writes `run/<name>.json` with `"sock"` set, and holds the flock;
+3. prints `http://127.0.0.1:7171/<name>/` as its URL.
 
 The hub routes `/<name>/…` to `httputil.ReverseProxy` over a unix
-`DialContext`, **path unstripped, no body/header rewriting** beyond the
-stdlib's hop-by-hop handling. Liveness = the socket connects; on dial
-failure the hub returns a 502 card naming the root and removes the
-dangling entry. Lifetime = the session: socket dies with the process.
+`DialContext`, with the **path unstripped and no body or header
+rewriting** beyond the stdlib's hop-by-hop handling. Liveness is the
+flock plus the socket connecting. On failure the hub returns a 502 card
+naming the root and prunes the entry. Use proxy when the session must
+keep its own binary or flags (e.g. `glow-web-dev` while hacking
+glow-web itself) and for any version skew (§4.V).
 
-So the registry entry's *type* is the whole policy:
+| entry | where | hub does | lives until |
+|---|---|---|---|
+| symlink → dir | `mounts/` | serves in-process (B1) | `unpublish` |
+| `<name>.json`, no `sock` | `run/` | serves in-process (B2) | lock dropped |
+| `<name>.json` + `<name>.sock` | `run/` | proxies verbatim (C) | lock dropped |
 
-| entry in `mounts/` | hub does | lives until |
-|---|---|---|
-| symlink → dir | serves in-process (B) | `unpublish` |
-| `*.sock` (or link → sock) | proxies to it (C) | the session exits |
+- `--hub=auto` (the eventual default): lease when the versions are
+  compatible (§4.V), otherwise proxy. `--hub=off` / `--standalone` /
+  `GLOW_WEB_HUB=off` gives today's behaviour. **Fork N4**: keep `off`
+  the default for one release, then switch to `auto`.
+- A run record shadows a pinned mount of the same name and root; the
+  index shows the mode in use. A record with a *different* root under
+  the same name is a collision (N1).
 
-- Why proxy rather than "session just leases a dir the hub serves":
-  the session keeps its own binary + flags (e.g. `glow-web-dev` while
-  hacking glow-web itself), and the hub never needs to know them.
-  **Fork N3**: also offer lease-only (`mounts/<name>` symlink +
-  `mounts/<name>.pid`; hub serves while pid lives) — cheaper, but
-  session flags are lost. Recommend: not at first.
-- `--standalone` (or `GLOW_WEB_HUB=off`) forces today's behaviour.
-  **Fork N4**: should registering be the default when a hub is found,
-  or opt-in (`--hub`)? Recommend opt-in for one release, then default.
+### V. Version contract: proxy across skew, upgrade without coordination
+
+The hub and its instances share a **tiny, separately versioned
+contract**, not a glow-web version:
+
+```json
+// run/<name>.json — contract v1
+{ "contract": 1, "name": "glow-web", "root": "/Users/me/dev-llm/glow-web",
+  "pid": 4242, "version": "v0.14.2-3-gabc+dirty", "sock": "glow-web.sock",
+  "started": "2026-11-15T10:00:00Z" }
+```
+
+What v1 promises: the record shape, the flock rule, HTTP/1.1 over the
+unix socket, and an instance that serves under `/<name>` (it was told
+its prefix). Nothing else. The rendering, templates and routes under
+`/<name>/` are the instance's own business.
+
+| situation | hub does |
+|---|---|
+| same `contract` major, any glow-web version, `sock` set | proxy (always safe: the hub never interprets the content) |
+| lease record, hub version == instance version | serve in-process |
+| lease record, versions differ | `--hub=auto` instances never write this: they open a socket and go to proxy. If one exists anyway (written with `--hub=lease`), serve it in-process and mark it "rendered by hub vX" in the index |
+| unknown `contract` major | don't route; index lists it as "incompatible (contract N)" with both versions |
+| unknown fields | ignore (adding fields is a minor change; removing or renaming one is a major change) |
+
+Consequences:
+
+- **Upgrading the hub** (launchd restart, or a D takeover by a newer
+  binary) disturbs no proxied session. Sessions older or newer than
+  the hub keep working as long as the contract major matches.
+- **Upgrading a session** never requires restarting the hub. A
+  `glow-web-dev` session beside stable ones is the normal case, not
+  an edge case.
+- The index shows each mount's version and highlights skew. It does
+  not enforce matching versions, which keeps lmux's
+  restart-with-approval flow (glow-web-lifecycle.md) a separate,
+  optional layer.
+- In D, a takeover winner whose contract is older than a record's
+  leaves that record alone. A hub never deletes what it cannot read.
 
 ### D. First listener wins (no daemon required)
 
@@ -167,15 +217,37 @@ persist on disk, so URLs come back on the same port and paths.
   with the same `glow-web hub` code optionally under launchd for an
   always-on site; one registry, so no design fork between them.
 
-### E. lmux mounts the hub once
+### E. lmux in front of the hub (the current deployment; optional)
 
-With B+C, lmux stops spawning per-project glow-web for docs and adds
-one route: `lmux.test/docs/…` (or `docs.lmux.test`) → `unix//…/_hub.sock`,
-hub run with `--url-prefix /docs`. Per-project hosts keep `/glow-web/`
-as a 302 to `lmux.test/docs/<slug>/` or proxy `/glow-web/` →
-hub `/<slug>/` (**fork N5**, lmux's call; url-stability §8 says
-redirect). TLS, DNS and future auth stay lmux's job; glow-web hub
-stays plain HTTP on loopback/unix.
+glow-web does all of A–D **on its own**: no lmux dependency, no lmux
+awareness in glow-web code. lmux is one deployment shape: a TLS, DNS
+and auth front that forwards to glow-web's hub, just as it would to any
+other upstream.
+
+- The hub always also listens on `run/hub.sock`, beside its TCP port.
+  lmux adds **one** upstream: `docs.lmux.test` → `unix//…/run/hub.sock`,
+  forwarded unstripped. glow-web's registry stays the only source of
+  truth for what is mounted. lmux does not read `run/` and does not
+  spawn glow-web for docs.
+- **Use a subdomain, not a path.** With `docs.lmux.test/<name>/`, the
+  hub's prefix stays empty, so each instance's prefix is just
+  `/<name>` everywhere: the same URLs direct on `:7171` and through
+  lmux. A path mount (`lmux.test/docs/`) would give the hub
+  `--url-prefix /docs`. Proxied sessions would then need
+  `/docs/<name>`, which means reading the hub's prefix from
+  `run/hub.json` at start and restarting whenever it changes. That is
+  workable, but it is coupling. **Recommend the subdomain.**
+- Per-project hosts (`<slug>.lmux.test/glow-web/`) 302 to
+  `docs.lmux.test/<slug>/`, or lmux keeps spawning there until the hub
+  is trusted (**fork N5**, lmux's call; url-stability §8 favours the
+  redirect).
+- Not chosen: lmux becomes the hub itself by reading glow-web's `run/`
+  records and proxying to session sockets. That puts glow-web's
+  contract in a second implementation (Python) and breaks "glow-web
+  does it alone". It stays possible later, because contract v1 is
+  plain JSON.
+- With lmux in front, auth is lmux's gate. glow-web's own §6 middleware
+  is for standalone LAN or tailnet use.
 
 ### F. Alternative axis — host routing instead of path
 
@@ -213,28 +285,43 @@ default `--read-only` (**fork N6**).
 
 ## 7. Paths & files
 
-| thing | default (macOS) | XDG |
+Split by what the data *is*, per XDG (env vars honoured, these are the
+fallbacks on macOS):
+
+| thing | path | why there |
 |---|---|---|
-| registry | `~/.local/state/glow-web/mounts/` | `$XDG_STATE_HOME/glow-web/mounts/` |
-| session sockets | `mounts/` itself (sockets beside symlinks) | `$XDG_RUNTIME_DIR/glow-web/` |
-| hub socket | `mounts/_hub.sock` | same |
+| pinned mounts | `~/.config/glow-web/mounts/` (`$XDG_CONFIG_HOME`) | user-authored, durable, syncable; never auto-pruned |
+| run records, session sockets, `hub.sock`, hub lock | `~/.local/state/glow-web/run/` (`$XDG_RUNTIME_DIR/glow-web/` when set) | live and machine-local. Pruned by the hub, but only after liveness fails |
 | hub port | `127.0.0.1:7171` (**fork N7**: pick) | — |
 
-macOS caps `sun_path` at 104 bytes and `$TMPDIR` is a long
-`/var/folders/…` path, so keep sockets under `~/.local/state/glow-web/`
-with short names (`<name>.sock`, name ≤ 63 chars, or hashed).
+**Not `~/.cache`.** Cache means "safe to delete at any time", and
+deleting a live socket silently unroutes a running session.
+**Not `$TMPDIR`.** On macOS it is a long `/var/folders/…` path, and
+`sun_path` is capped at 104 bytes. Even `~/.local/state/glow-web/run/`
+costs ~41 bytes for a typical home, so a socket is `<name>.sock` when
+the full path fits in 103 bytes, else `<fnv32(name)>.sock`, with the
+record's `sock` field giving the mapping. Both dirs are created 0700;
+the hub refuses them if they are group- or world-writable or not owned
+by `$UID` (§5).
 
-## 8. Recommended order
+## 8. Rungs: implement, validate and test one at a time
 
-1. A (`--listen unix:`) — tiny, unblocks lmux immediately.
-2. B (`hub` + symlink registry + `publish/unpublish/ls`) — the doc site.
-3. C (session sockets) — "open while the session is open".
-4. E in lmux — one route.
-5. D (first listener wins) once C is in. With an on-disk registry it
-   is a small addition, not a protocol. Auth when anything leaves loopback.
+Each rung is its own branch-sized change: spec delta, red tests, code,
+green, a manual check, commit. Later rungs depend only on earlier ones
+being *merged*, never on future ones.
 
-Tests per rung (red first): A — serve over a temp unix socket, GET
-via a unix-dial client; B — hub with two temp roots, index lists both,
-`/<a>/` links carry `/<a>` prefix, invalid names rejected; C — fake
-session socket, hub proxies verbatim (headers/path/body echo),
-dead socket → 502 + entry pruned.
+| # | rung | red tests first | manual validation |
+|---|---|---|---|
+| 1 | **A** `--listen unix:` | serve on a temp socket; GET via a unix-dial client; stale socket replaced only when dead; perms 0600 | `glow-web web . --listen unix:/tmp/g.sock & curl --unix-socket /tmp/g.sock http://x/` |
+| 2 | **names** (§3) | kebab rule matches lmux's `_kebab` on a fixture list; invalid names rejected; `_` reserved | `glow-web web ~/dev-llm/ClaudeCollab --print-name` → `claude-collab` |
+| 3 | **B1** hub + pinned mounts + `publish/unpublish/ls` | two temp roots, index lists both, `/<a>/` links carry `/<a>`; unpublish → 404; dir perms enforced; Host check | `glow-web publish ~/notes; glow-web hub; open :7171/` |
+| 4 | **B2** lease | flock held → served; process killed → 404 + pruned; record shadows pin | `glow-web web . --hub=lease`, Ctrl-C, reload |
+| 5 | **C** proxy | fake backend echoes path/headers/body: verbatim; dead sock → 502 + pruned | `glow-web web . --hub=proxy`; `curl -i :7171/<name>/` |
+| 6 | **V** contract + `--hub=auto` | record round-trips; unknown major → "incompatible", not routed; unknown fields ignored; auto chooses lease vs proxy by version | run `glow-web-dev` beside `glow-web` against one hub; index shows the skew, both serve |
+| 7 | **D** first listener wins | two in-process "sessions": the first binds, the second registers; kill the first → the second takes the port and serves both from disk | two terminals, kill the first, reload the bookmark |
+| 8 | **E** lmux front (lmux repo; glow-web unchanged) | lmux route test against a stub `hub.sock` | `open https://docs.lmux.test/` matches `:7171/` link for link |
+| 9 | **auth** (§6) | 401 without creds, 200 with; one realm; applies to every mount kind | `--auth-htpasswd ~/.config/glow-web/htpasswd` |
+
+Rungs 3–4 and 5 are independent once 2 lands. Rung 6 needs 4 and 5.
+Rung 7 needs 3. Rung 8 needs 3 (the hub on `hub.sock`); before that,
+lmux can already forward to a single session via rung 1.
