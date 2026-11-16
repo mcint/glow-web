@@ -47,6 +47,12 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
   just work. The hub index shows each session's version and flags skew.
   Sessions from a newer run-record contract are listed as `incompatible`
   and explained rather than routed. Rung 6 (V).
+- No daemon needed: any `--hub=lease|proxy|auto` session becomes the hub
+  when none is running (an election by flock on `run/hub.lock`), and another
+  takes over within ~2s when it exits, on the same port and URLs. `glow-web
+  hub` joins the same election, so it can't collide with an elected session.
+  `--hub-elect=false` opts out; `--hub-addr` / `GLOW_WEB_HUB_ADDR` sets the
+  port. Rung 7 (D).
 
 ### Security
 

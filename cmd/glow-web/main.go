@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mcint/glow-web/internal/hub"
 	"github.com/mcint/glow-web/internal/registry"
 	"github.com/mcint/glow-web/internal/render"
 	"github.com/mcint/glow-web/internal/slice"
@@ -83,14 +84,27 @@ func runWeb(args []string) {
 	prefix := fs.String("url-prefix", "", `mount under URL prefix, e.g. "/docs"`)
 	hubMode := fs.String("hub", "off", `join the host's glow-web hub instead of binding a port: "off" (default) | "lease" (the hub serves PATH at /<name>/ while this process runs) | "proxy" (this process serves PATH on its own socket; the hub forwards /<name>/ to it) | "auto" (lease when the hub runs this exact build, else proxy)`)
 	name := fs.String("name", "", "mount name under the hub (default: derived from PATH; see `glow-web name`)")
+	hubAddr := fs.String("hub-addr", envOr("GLOW_WEB_HUB_ADDR", DefaultHubAddr), "where an elected hub listens (env GLOW_WEB_HUB_ADDR)")
+	elect := fs.Bool("hub-elect", true, "with --hub: become the hub when none is running, and take over when it exits")
 	sf := addServerFlags(fs)
 	parseIntermixed(fs, args)
 	if fs.NArg() < 1 {
 		fmt.Fprintln(os.Stderr, "glow-web web: missing PATH (file or directory)")
 		os.Exit(2)
 	}
+	var el *hub.Elector
+	if *hubMode != "off" {
+		el = sessionElector(registry.DefaultState(), *hubAddr, sf, *elect)
+	}
 	if *hubMode == "auto" {
-		hs, up := hubStatus(registry.DefaultState())
+		st := registry.DefaultState()
+		hs, up := hubStatus(st)
+		if !up && el != nil {
+			// No hub: try to be it. Then the hub is this exact build.
+			if won, _ := el.TryOnce(); won {
+				hs, up = hub.Status{Version: version.String()}, true
+			}
+		}
 		*hubMode = autoMode(up, hs.Version, version.String())
 		fmt.Fprintf(os.Stderr, "glow-web: --hub=auto → %s\n", *hubMode)
 	}
@@ -100,13 +114,13 @@ func runWeb(args []string) {
 		if fs.NArg() > 1 {
 			die(fmt.Errorf("--hub=lease takes one PATH"))
 		}
-		runLease(fs.Arg(0), *name)
+		runLease(fs.Arg(0), *name, el)
 		return
 	case "proxy":
 		if fs.NArg() > 1 {
 			die(fmt.Errorf("--hub=proxy takes one PATH"))
 		}
-		runProxy(fs.Arg(0), *name, sf)
+		runProxy(fs.Arg(0), *name, sf, el)
 		return
 	default:
 		die(fmt.Errorf("--hub=%q: want off, lease, proxy or auto", *hubMode))
@@ -127,7 +141,7 @@ func runWeb(args []string) {
 		if err != nil {
 			die(err)
 		}
-		die(serveHub(h, spec, "", nil, ""))
+		die(serveEphemeral(h, spec))
 	}
 
 	s, err := web.NewServer(fs.Arg(0), sf.walk())
@@ -273,6 +287,13 @@ func parseIntermixed(fs *flag.FlagSet, args []string) {
 		}
 	}
 	_ = fs.Parse(append(flagArgs, positional...))
+}
+
+func envOr(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
 }
 
 func die(err error) {

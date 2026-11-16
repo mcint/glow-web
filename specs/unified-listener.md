@@ -202,8 +202,9 @@ Consequences:
 
 ### D. First listener wins (no daemon required)
 
-`glow-web web .` with hub mode on tries to bind the hub port. If it
-wins, it *is* the hub (serves its own root in-process plus the
+`glow-web web .` with hub mode on tries to take the hub lock (built:
+an flock on `run/hub.lock`) and then bind the hub port. If it wins, it *is*
+the hub (serves its own root in-process plus the
 registry). If the port is held by a glow-web hub (probe
 `GET /_/hub` → JSON), it registers as in C. If the hub process exits,
 sessions notice (their hub-probe goroutine, every few seconds) and race
@@ -352,7 +353,15 @@ an exact version match with the hub and otherwise proxies, including when no
 hub is up yet, since a proxy works under any later hub on the same major.
 The index has a version column with a "≠ hub" marker. Unknown-major records
 are listed as `incompatible`, 502 with an explanation, never shadow a pin,
-and are never deleted). Decided while building: N1 = refuse and name the holder; N7 =
+and are never deleted), rung 7 done (first listener wins. The election
+token is an flock on `run/hub.lock`, not a bind race: two sessions that both
+found a stale `hub.sock` could otherwise both remove it and both "win". The
+lock holder alone clears and binds `hub.sock` and the TCP port. Losers retry
+every 2s, and a bind failure while holding the lock releases it. `glow-web
+hub` takes the same lock, so it defers to an elected session and names its
+pid. `--hub-elect=false` opts out; `--hub-addr`/`GLOW_WEB_HUB_ADDR` pick the
+port. `auto` with no hub tries to win first and then leases from itself).
+Decided while building: N1 = refuse and name the holder; N7 =
 7171. The registry is re-read per request (one ReadDir), not on an mtime
 check: simpler, and correct when a pin's target disappears. Under a hub,
 `--title-prefix` defaults to the mount name.

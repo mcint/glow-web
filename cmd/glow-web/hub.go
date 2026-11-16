@@ -52,8 +52,55 @@ func runHub(args []string) {
 	if *listenSpec != "" {
 		spec = *listenSpec
 	}
+	// The dedicated hub takes the same election lock as sessions do (rung
+	// 7), so it and an elected session can never both serve.
+	el := &hub.Elector{State: st, Addr: spec, AllowHost: splitComma(*allowHost), NewHub: func() *hub.Hub { return h }}
+	won, err := el.TryOnce()
+	if err != nil {
+		die(err)
+	}
+	if !won {
+		die(fmt.Errorf("a hub is already running for %s (pid %d); `glow-web ls` shows it", st.Dir, st.HubLockHolder()))
+	}
+	fmt.Fprintf(os.Stderr, "glow-web hub %s — state %s\n", version.String(), st.Dir)
+	if h.BaseURL != "" {
+		fmt.Fprintf(os.Stderr, "    %s%s/\n", h.BaseURL, h.URLPrefix)
+	}
 	sock := filepath.Join(st.RunDir(), "hub.sock")
-	die(serveHub(h, spec, sock, splitComma(*allowHost), st.Dir))
+	fmt.Fprintf(os.Stderr, "    unix:%s  (curl --unix-socket %s http://localhost%s/)\n", sock, sock, h.URLPrefix)
+	die(el.Wait())
+}
+
+// sessionElector lets a hub-aware session become the hub when none is
+// running, and take over when the hub exits (rung 7). It returns nil when
+// election is off.
+func sessionElector(st registry.State, addr string, sf *serverFlags, on bool) *hub.Elector {
+	if !on {
+		return nil
+	}
+	cfg, err := sf.apply(true)
+	if err != nil {
+		die(err)
+	}
+	return &hub.Elector{
+		State:  st,
+		Addr:   addr,
+		NewHub: func() *hub.Hub { return &hub.Hub{Walk: sf.walk(), Configure: cfg} },
+		Log:    func(s string) { fmt.Fprintln(os.Stderr, s) },
+	}
+}
+
+// joinHub runs the election for the session's lifetime: one synchronous try
+// (so the URL printed next is right), then a retry every 2s. The returned
+// func stops it and releases the hub.
+func joinHub(el *hub.Elector) func() {
+	if el == nil {
+		return func() {}
+	}
+	_, _ = el.TryOnce()
+	stop := make(chan struct{})
+	go el.Run(2*time.Second, stop)
+	return func() { close(stop); el.Close() }
 }
 
 func newHub(st *registry.State, extra []hub.Mount, prefix string, sf *serverFlags) (*hub.Hub, error) {
@@ -70,47 +117,28 @@ func newHub(st *registry.State, extra []hub.Mount, prefix string, sf *serverFlag
 	}, nil
 }
 
-// serveHub binds the main listener (Host-checked when TCP) and, when sock
-// is non-empty, the hub's unix socket too, then blocks. A live hub.sock
-// means another hub is running: that is an error, not a takeover.
-func serveHub(h *hub.Hub, spec, sock string, allow []string, stateDir string) error {
+// serveEphemeral serves an ephemeral hub (`web a/ b/`): no registry, no
+// hub.sock, no election. Just these roots on one listener.
+func serveEphemeral(h *hub.Hub, spec string) error {
 	ln, err := listen.Listen(spec)
 	if err != nil {
 		return err
 	}
-	var sockLn net.Listener
-	if sock != "" {
-		if sockLn, err = listen.Listen("unix:" + sock); err != nil {
-			ln.Close()
-			return err
-		}
-	}
-	fmt.Fprintf(os.Stderr, "glow-web hub %s", version.String())
-	if stateDir != "" {
-		fmt.Fprintf(os.Stderr, " — state %s", stateDir)
-	}
-	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "glow-web %s — %d roots on one listener\n", version.String(), len(h.Extra))
 	handler := h.Handler()
 	if ln.Addr().Network() == "tcp" {
-		h.BaseURL = "http://" + ln.Addr().String()
-		fmt.Fprintf(os.Stderr, "    %s%s/\n", h.BaseURL, h.URLPrefix)
-		handler = hub.HostCheck(handler, allow)
+		fmt.Fprintf(os.Stderr, "    http://%s%s/\n", ln.Addr(), h.URLPrefix)
+		handler = hub.HostCheck(handler, nil)
 	} else {
 		fmt.Fprintf(os.Stderr, "    unix:%s\n", ln.Addr())
 	}
-	errc := make(chan error, 2)
-	if sockLn != nil {
-		fmt.Fprintf(os.Stderr, "    unix:%s  (curl --unix-socket %s http://localhost%s/)\n", sock, sock, h.URLPrefix)
-		go func() { errc <- http.Serve(sockLn, h.Handler()) }()
-	}
-	go func() { errc <- http.Serve(ln, handler) }()
-	return <-errc
+	return http.Serve(ln, handler)
 }
 
 // runLease registers root with the hub as a lease (rung 4) and holds it
 // until SIGINT/SIGTERM: the hub serves root at /<name>/ exactly while this
 // process lives. Nothing is bound here.
-func runLease(root, name string) {
+func runLease(root, name string, el *hub.Elector) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		die(err)
@@ -127,15 +155,17 @@ func runLease(root, name string) {
 		die(err)
 	}
 	fmt.Fprintf(os.Stderr, "glow-web %s — leased %s as %q (served by the hub while this runs; Ctrl-C to release)\n", version.String(), abs, name)
+	leave := joinHub(el)
 	printHubURL(st, name)
 	waitForSignal()
 	lease.Close()
+	leave()
 }
 
 // runProxy serves root itself on run/<name>.sock and registers it, so the
 // hub forwards /<name>/ here verbatim (rung 5). The session keeps its own
 // binary and flags, e.g. glow-web-dev beside a stable hub.
-func runProxy(root, name string, sf *serverFlags) {
+func runProxy(root, name string, sf *serverFlags, el *hub.Elector) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		die(err)
@@ -179,10 +209,12 @@ func runProxy(root, name string, sf *serverFlags) {
 		die(err)
 	}
 	go func() { die(s.ServeListener(ln)) }()
+	leave := joinHub(el)
 	printHubURL(st, name)
 	waitForSignal()
 	lease.Close()
 	ln.Close()
+	leave()
 }
 
 // autoMode picks the --hub=auto behaviour. Lease only when the hub runs
@@ -200,7 +232,7 @@ func printHubURL(st registry.State, name string) {
 		fmt.Fprintf(os.Stderr, "    %s/%s/\n", hs.URL, name)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "    no hub running yet: start `glow-web hub` (this session is already registered)\n")
+	fmt.Fprintf(os.Stderr, "    no hub reachable yet (another hub-aware session or `glow-web hub` will serve it; this one keeps trying)\n")
 }
 
 func waitForSignal() {
@@ -310,7 +342,7 @@ func runLs(args []string) {
 	tw.Flush()
 	hubLive := "not running"
 	if listen.Alive(filepath.Join(st.RunDir(), "hub.sock")) {
-		hubLive = "running"
+		hubLive = fmt.Sprintf("running (pid %d)", st.HubLockHolder())
 	}
 	fmt.Fprintf(os.Stderr, "state %s · hub %s\n", st.Dir, hubLive)
 }
