@@ -67,12 +67,15 @@ func (e *Elector) TryOnce() (bool, error) {
 	if tcp.Addr().Network() == "tcp" {
 		h.BaseURL = "http://" + tcp.Addr().String()
 	}
-	e.lock, e.hub, e.errc = lock, h, make(chan error, 2)
+	// The serve goroutines send on a local: Close resets e.errc under the
+	// mutex, and they must not read the field (caught by -race).
+	errc := make(chan error, 2)
+	e.lock, e.hub, e.errc = lock, h, errc
 	public := &http.Server{Handler: HostCheck(h.Handler(), e.AllowHost)}
 	private := &http.Server{Handler: h.Handler()}
 	e.srvs = []*http.Server{public, private}
-	go func() { e.errc <- public.Serve(tcp) }()
-	go func() { e.errc <- private.Serve(sock) }()
+	go func() { errc <- public.Serve(tcp) }()
+	go func() { errc <- private.Serve(sock) }()
 	e.logf("glow-web: now the hub at %s%s/ (pid %d)", h.BaseURL, h.URLPrefix, os.Getpid())
 	return true, nil
 }
