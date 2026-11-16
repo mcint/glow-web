@@ -13,7 +13,7 @@ tldr: >
   Today every glow-web is its own TCP port. A ladder of rungs, each
   implemented and tested alone: (A) `--listen unix:`; names = lmux's
   kebab(basename); (B1) `glow-web hub` serving pinned mounts (symlinks in
-  ~/.config/glow-web/mounts); (B2) lease mode: the hub serves a root only
+  ~/.local/state/glow-web/mounts); (B2) lease mode: the hub serves a root only
   while that dir's process holds an flock on its run record; (C) proxy
   mode: the session serves its own socket and the hub forwards verbatim;
   (V) a tiny versioned record contract so the hub proxies across
@@ -96,7 +96,7 @@ first.
 #### B1. Pinned: serves until you unpublish
 
 ```
-~/.config/glow-web/mounts/
+~/.local/state/glow-web/mounts/
   notes         -> /Users/me/notes
   claude-collab -> /Users/me/dev-llm/ClaudeCollab
 ```
@@ -105,8 +105,10 @@ first.
 and `glow-web ls` are verbs, each with an inverse, and thin wrappers
 over `ln -s`, `rm` and `ls`. A pinned mount survives the session that
 made it (pow `~/.pow`, Valet `link`, `tailscale serve --bg`). It lives
-in **config** because it is user-authored intent: dotfile-syncable,
-readable, never auto-pruned.
+in **state**, beside `run/`: one `glow-web` dir holds everything the
+hub serves, so the pins share fate with the hub's records (wipe or move
+one dir, and the machine's doc site goes with it). Pins are still never
+auto-pruned.
 
 #### B2. Lease: served by the hub only while the dir's process is open
 
@@ -285,12 +287,13 @@ default `--read-only` (**fork N6**).
 
 ## 7. Paths & files
 
-Split by what the data *is*, per XDG (env vars honoured, these are the
-fallbacks on macOS):
+One state dir, `~/.local/state/glow-web/` (`$XDG_STATE_HOME`), with
+**fate-sharing** between pins and live records. That was the user's call
+(2026-11-16) over the "pins are config" argument (dotfile-syncable intent):
 
 | thing | path | why there |
 |---|---|---|
-| pinned mounts | `~/.config/glow-web/mounts/` (`$XDG_CONFIG_HOME`) | user-authored, durable, syncable; never auto-pruned |
+| pinned mounts | `~/.local/state/glow-web/mounts/` | durable and machine-local, with symlinks to absolute paths; never auto-pruned |
 | run records, session sockets, `hub.sock`, hub lock | `~/.local/state/glow-web/run/` (`$XDG_RUNTIME_DIR/glow-web/` when set) | live and machine-local. Pruned by the hub, but only after liveness fails |
 | hub port | `127.0.0.1:7171` (**fork N7**: pick) | — |
 
@@ -320,7 +323,7 @@ being *merged*, never on future ones.
 | 6 | **V** contract + `--hub=auto` | record round-trips; unknown major → "incompatible", not routed; unknown fields ignored; auto chooses lease vs proxy by version | run `glow-web-dev` beside `glow-web` against one hub; index shows the skew, both serve |
 | 7 | **D** first listener wins | two in-process "sessions": the first binds, the second registers; kill the first → the second takes the port and serves both from disk | two terminals, kill the first, reload the bookmark |
 | 8 | **E** lmux front (lmux repo; glow-web unchanged) | lmux route test against a stub `hub.sock` | `open https://docs.lmux.test/` matches `:7171/` link for link |
-| 9 | **auth** (§6) | 401 without creds, 200 with; one realm; applies to every mount kind | `--auth-htpasswd ~/.config/glow-web/htpasswd` |
+| 9 | **auth** (§6) | 401 without creds, 200 with; one realm; applies to every mount kind | `--auth-htpasswd FILE` |
 
 Rungs 3–4 and 5 are independent once 2 lands. Rung 6 needs 4 and 5.
 Rung 7 needs 3. Rung 8 needs 3 (the hub on `hub.sock`); before that,
