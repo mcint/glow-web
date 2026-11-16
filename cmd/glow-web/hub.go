@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"golang.org/x/term"
+
+	"github.com/mcint/glow-web/internal/auth"
 	"github.com/mcint/glow-web/internal/hub"
 	"github.com/mcint/glow-web/internal/listen"
 	"github.com/mcint/glow-web/internal/registry"
@@ -33,6 +37,7 @@ func runHub(args []string) {
 	listenSpec := fs.String("listen", "", `listen spec, overrides --addr: "tcp:HOST:PORT" or "unix:PATH"`)
 	prefix := fs.String("url-prefix", "", `mount the whole hub under a prefix, e.g. "/docs" (mounts then live at /docs/<name>/)`)
 	allowHost := fs.String("allow-host", "", "comma-separated extra Host names the TCP listener accepts (loopback names always are)")
+	authFile := fs.String("auth-htpasswd", "", "htpasswd file (bcrypt) for HTTP Basic on the TCP listener (default: <state>/htpasswd when it exists)")
 	sf := addServerFlags(fs)
 	parseIntermixed(fs, args)
 
@@ -54,7 +59,8 @@ func runHub(args []string) {
 	}
 	// The dedicated hub takes the same election lock as sessions do (rung
 	// 7), so it and an elected session can never both serve.
-	el := &hub.Elector{State: st, Addr: spec, AllowHost: splitComma(*allowHost), NewHub: func() *hub.Hub { return h }}
+	gate := hubGate(st, *authFile)
+	el := &hub.Elector{State: st, Addr: spec, AllowHost: splitComma(*allowHost), Gate: gate.Wrap, NewHub: func() *hub.Hub { return h }}
 	won, err := el.TryOnce()
 	if err != nil {
 		die(err)
@@ -66,6 +72,7 @@ func runHub(args []string) {
 	if h.BaseURL != "" {
 		fmt.Fprintf(os.Stderr, "    %s%s/\n", h.BaseURL, h.URLPrefix)
 	}
+	authNotice(gate, spec)
 	sock := filepath.Join(st.RunDir(), "hub.sock")
 	fmt.Fprintf(os.Stderr, "    unix:%s  (curl --unix-socket %s http://localhost%s/)\n", sock, sock, h.URLPrefix)
 	die(el.Wait())
@@ -82,12 +89,85 @@ func sessionElector(st registry.State, addr string, sf *serverFlags, on bool) *h
 	if err != nil {
 		die(err)
 	}
+	// An elected hub enforces the state dir's htpasswd exactly as a
+	// dedicated one would: auth doesn't depend on who won the election.
+	gate := hubGate(st, "")
 	return &hub.Elector{
 		State:  st,
 		Addr:   addr,
+		Gate:   gate.Wrap,
 		NewHub: func() *hub.Hub { return &hub.Hub{Walk: sf.walk(), Configure: cfg} },
 		Log:    func(s string) { fmt.Fprintln(os.Stderr, s) },
 	}
+}
+
+// hubGate is the hub's auth: an explicit file, else <state>/htpasswd when
+// it exists (fate-shared with the registry, spec §6). A bad file is fatal
+// at startup.
+func hubGate(st registry.State, explicit string) *auth.Gate {
+	g := &auth.Gate{Path: filepath.Join(st.Dir, "htpasswd"), Optional: true}
+	if explicit != "" {
+		g = &auth.Gate{Path: explicit}
+	}
+	if err := g.Check(); err != nil {
+		die(err)
+	}
+	return g
+}
+
+// authNotice says whether auth is on and warns when Basic credentials
+// would cross a network in cleartext.
+func authNotice(g *auth.Gate, spec string) {
+	if g == nil || !g.Enabled() {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "    auth: HTTP Basic on TCP (%s); unix sockets are gated by file mode\n", g.Path)
+	network, address, err := listen.Parse(spec)
+	if err != nil || network != "tcp" {
+		return
+	}
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return
+	}
+	if ip := net.ParseIP(strings.Trim(host, "[]")); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		fmt.Fprintf(os.Stderr, "    warning: Basic auth on %s travels in cleartext; put TLS in front (lmux, Caddy, tailscale serve)\n", address)
+	}
+}
+
+// runPasswd prints one htpasswd line for USER. The password comes from the
+// terminal (no echo) or, when piped, from the first line of stdin.
+func runPasswd(args []string) {
+	fs := flag.NewFlagSet("passwd", flag.ExitOnError)
+	parseIntermixed(fs, args)
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: glow-web passwd USER >> ~/.local/state/glow-web/htpasswd")
+		os.Exit(2)
+	}
+	var pass string
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprint(os.Stderr, "password: ")
+		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			die(err)
+		}
+		pass = string(b)
+	} else {
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil && line == "" {
+			die(fmt.Errorf("passwd: no password on stdin"))
+		}
+		pass = strings.TrimRight(line, "\r\n")
+	}
+	if pass == "" {
+		die(fmt.Errorf("passwd: empty password"))
+	}
+	l, err := auth.HashLine(fs.Arg(0), pass)
+	if err != nil {
+		die(err)
+	}
+	fmt.Println(l)
 }
 
 // joinHub runs the election for the session's lifetime: one synchronous try
@@ -119,7 +199,7 @@ func newHub(st *registry.State, extra []hub.Mount, prefix string, sf *serverFlag
 
 // serveEphemeral serves an ephemeral hub (`web a/ b/`): no registry, no
 // hub.sock, no election. Just these roots on one listener.
-func serveEphemeral(h *hub.Hub, spec string) error {
+func serveEphemeral(h *hub.Hub, spec string, gate *auth.Gate) error {
 	ln, err := listen.Listen(spec)
 	if err != nil {
 		return err
@@ -128,6 +208,10 @@ func serveEphemeral(h *hub.Hub, spec string) error {
 	handler := h.Handler()
 	if ln.Addr().Network() == "tcp" {
 		fmt.Fprintf(os.Stderr, "    http://%s%s/\n", ln.Addr(), h.URLPrefix)
+		if gate != nil {
+			handler = gate.Wrap(handler)
+			authNotice(gate, spec)
+		}
 		handler = hub.HostCheck(handler, nil)
 	} else {
 		fmt.Fprintf(os.Stderr, "    unix:%s\n", ln.Addr())

@@ -59,6 +59,9 @@ type Server struct {
 	// hub (e.g. "/" or "/docs/"); the location then starts with a "hub"
 	// crumb. Empty when standalone.
 	HubURL string
+	// TCPGate, when set, wraps the handler on TCP listeners only (auth).
+	// A unix socket is gated by its file mode instead.
+	TCPGate func(http.Handler) http.Handler
 }
 
 // NewServer constructs a Server, autodetecting Mode from path's stat. walkOpts
@@ -131,6 +134,9 @@ func (s *Server) ServeListener(ln net.Listener) error {
 		s.Addr = ln.Addr().String()
 		for _, line := range s.listenerLines(s.Addr) {
 			fmt.Fprintln(os.Stderr, line)
+		}
+		if s.TCPGate != nil {
+			return http.Serve(ln, s.TCPGate(s.Handler()))
 		}
 	}
 	return http.Serve(ln, s.Handler())

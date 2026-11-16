@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mcint/glow-web/internal/auth"
 	"github.com/mcint/glow-web/internal/hub"
 	"github.com/mcint/glow-web/internal/registry"
 	"github.com/mcint/glow-web/internal/render"
@@ -31,6 +32,8 @@ commands:
   publish  pin PATH to the hub at /<name>/ until unpublished
   unpublish NAME   remove a pin (never touches the dir itself)
   ls       list published mounts and whether the hub runs
+  passwd USER      print an htpasswd (bcrypt) line; append it to
+           <state>/htpasswd to turn on hub auth
   slice    extract a section by heading path
   render   render a markdown file to stdout (html | markup)
   name     print the mount name derived from PATH (default .)
@@ -58,6 +61,8 @@ func main() {
 		runUnpublish(args)
 	case "ls":
 		runLs(args)
+	case "passwd":
+		runPasswd(args)
 	case "name":
 		runName(args)
 	case "slice":
@@ -86,6 +91,7 @@ func runWeb(args []string) {
 	name := fs.String("name", "", "mount name under the hub (default: derived from PATH; see `glow-web name`)")
 	hubAddr := fs.String("hub-addr", envOr("GLOW_WEB_HUB_ADDR", DefaultHubAddr), "where an elected hub listens (env GLOW_WEB_HUB_ADDR)")
 	elect := fs.Bool("hub-elect", true, "with --hub: become the hub when none is running, and take over when it exits")
+	authFile := fs.String("auth-htpasswd", "", "htpasswd file (bcrypt) for HTTP Basic on a TCP listener; standalone and `web a/ b/` only (a hub uses <state>/htpasswd)")
 	sf := addServerFlags(fs)
 	parseIntermixed(fs, args)
 	if fs.NArg() < 1 {
@@ -141,7 +147,7 @@ func runWeb(args []string) {
 		if err != nil {
 			die(err)
 		}
-		die(serveEphemeral(h, spec))
+		die(serveEphemeral(h, spec, standaloneGate(*authFile)))
 	}
 
 	s, err := web.NewServer(fs.Arg(0), sf.walk())
@@ -154,6 +160,10 @@ func runWeb(args []string) {
 	}
 	cfg(s)
 	s.URLPrefix = normalizePrefix(*prefix)
+	if g := standaloneGate(*authFile); g != nil {
+		s.TCPGate = g.Wrap
+		authNotice(g, spec)
+	}
 	if err := s.Serve(spec); err != nil {
 		die(err)
 	}
@@ -287,6 +297,18 @@ func parseIntermixed(fs *flag.FlagSet, args []string) {
 		}
 	}
 	_ = fs.Parse(append(flagArgs, positional...))
+}
+
+// standaloneGate is auth for a non-hub listener: only when asked for.
+func standaloneGate(path string) *auth.Gate {
+	if path == "" {
+		return nil
+	}
+	g := &auth.Gate{Path: path}
+	if err := g.Check(); err != nil {
+		die(err)
+	}
+	return g
 }
 
 func envOr(k, def string) string {

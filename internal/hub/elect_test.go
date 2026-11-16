@@ -1,8 +1,10 @@
 package hub_test
 
 import (
+	"context"
 	"net"
 	"net/http"
+	"path/filepath"
 	"testing"
 
 	"github.com/mcint/glow-web/internal/hub"
@@ -101,4 +103,37 @@ func TestElect_PortBusyReleasesLock(t *testing.T) {
 		t.Error("lock still held after a failed bind")
 	}
 	squat.Close()
+}
+
+// Rung 9: the elector's Gate guards the TCP listener only; hub.sock (0600)
+// stays open to this user so sessions can probe /_/hub.
+func TestElect_GateOnTCPOnly(t *testing.T) {
+	f := setup(t)
+	addr := freeAddr(t)
+	deny := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "auth", http.StatusUnauthorized)
+		})
+	}
+	e := &hub.Elector{State: f.st, Addr: addr, Gate: deny, NewHub: func() *hub.Hub { return &hub.Hub{State: &f.st} }}
+	defer e.Close()
+	if won, err := e.TryOnce(); !won || err != nil {
+		t.Fatalf("won=%v err=%v", won, err)
+	}
+	if c := status(t, "http://"+addr+"/"); c != 401 {
+		t.Errorf("TCP = %d, want 401", c)
+	}
+	sock := filepath.Join(f.st.RunDir(), "hub.sock")
+	c := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, "unix", sock)
+	}}}
+	resp, err := c.Get("http://hub/_/hub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("hub.sock = %d, want 200", resp.StatusCode)
+	}
 }

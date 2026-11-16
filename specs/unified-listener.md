@@ -288,15 +288,42 @@ instances, since the prefix is all the instance knows about.
   pid, started, binary version) for `glow-web ls`; an `flock` on it
   beats pid checks (pids get reused, the kernel drops locks on crash).
 
-## 6. Auth (later, not now)
+## 6. Auth: HTTP Basic, bcrypt htpasswd (rung 9, 2026-11-16)
 
-One middleware at the hub — the single gate every mount passes
-through (security-design: one decision point). `--auth-htpasswd FILE`
-(bcrypt; `golang.org/x/crypto/bcrypt` is the one new dep) and
-optionally per-mount `require` in `mounts/<name>.toml`. Behind lmux,
-prefer lmux's gate and leave the hub's off. Edit/save endpoints on a
-shared port are the first thing worth gating; pinned mounts could
-default `--read-only` (**fork N6**).
+One gate, `internal/auth`, applied to every **TCP** listener glow-web
+opens: the hub (dedicated, elected or ephemeral) and standalone `web`.
+
+- **Where the file lives: `~/.local/state/glow-web/htpasswd`, fate-shared
+  with the registry.** When that file exists, *any* hub enforces it, so auth
+  can't depend on which session won the election (a per-session flag would
+  make it a coin toss). `--auth-htpasswd FILE` names a file explicitly; it
+  is the only way standalone `web` turns auth on.
+- **Format:** Apache htpasswd lines `user:<bcrypt>` (`$2a$`/`$2b$`/`$2y$`),
+  `#` comments and blank lines allowed. Other hash schemes (MD5-apr1, SHA1,
+  crypt) are refused with a message, never silently accepted. Make lines
+  with `glow-web passwd USER` (reads the password from stdin) or
+  `htpasswd -nB USER`.
+- **The file is checked like the state dir:** refused when group- or
+  world-writable or owned by another user (whoever can write it can add
+  themselves). It is re-read when its mtime changes, so adding or removing a
+  user needs no restart.
+- **Cost:** bcrypt runs on purpose slowly and browsers resend credentials
+  on every request. Verified credentials are cached by SHA-256 of
+  `user:password` until the file changes. A miss on an unknown user still
+  runs one bcrypt compare against a dummy hash, so timing doesn't reveal
+  which users exist.
+- **Unix sockets are not gated.** `hub.sock` and session sockets are mode
+  0600 in a 0700 dir: only this user reaches them already. Sessions probe
+  `/_/hub` over `hub.sock`, and a front (lmux) reaches the hub there and
+  applies its own gate. Gating the socket would add a second lock on a door
+  only the owner can open.
+- **Order on TCP:** Host check → auth → handler. The realm is `glow-web`,
+  one for the whole port, so browsers prompt once.
+- **Cleartext warning:** Basic auth on a non-loopback TCP bind prints a
+  startup warning that credentials travel in cleartext; put TLS in front
+  (lmux, Caddy, `tailscale serve`).
+- Not done: per-mount `require` and read-only pins (fork N6). Saving is
+  already behind the CSRF gate; auth now gates reading too.
 
 ## 7. Paths & files
 
@@ -360,7 +387,13 @@ lock holder alone clears and binds `hub.sock` and the TCP port. Losers retry
 every 2s, and a bind failure while holding the lock releases it. `glow-web
 hub` takes the same lock, so it defers to an elected session and names its
 pid. `--hub-elect=false` opts out; `--hub-addr`/`GLOW_WEB_HUB_ADDR` pick the
-port. `auto` with no hub tries to win first and then leases from itself).
+port. `auto` with no hub tries to win first and then leases from itself),
+the hub crumb shipped (`hub / <project> / …`), rung 8 done on the lmux side
+on branch `feat/promoted-sock` (promoted services take `{"sock": …}`; the
+peer uid is checked after connect; not yet merged or cut over), and rung 9
+done (§6: HTTP Basic on TCP listeners, `<state>/htpasswd` fate-shared and
+enforced by any hub, `glow-web passwd`; the floor rises to Go 1.26 because
+`golang.org/x/crypto` v0.58.0 requires it).
 Decided while building: N1 = refuse and name the holder; N7 =
 7171. The registry is re-read per request (one ReadDir), not on an mtime
 check: simpler, and correct when a pin's target disappears. Under a hub,

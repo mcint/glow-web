@@ -56,6 +56,19 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
 - Pages served under a hub start their location with a **hub** crumb
   (`hub / <project> / …`) that links to the hub index. README has a "Hub"
   section covering pin/lease/proxy/auto, election and the state layout.
+- HTTP Basic auth (bcrypt htpasswd) on TCP listeners. When
+  `~/.local/state/glow-web/htpasswd` exists, every hub enforces it,
+  including session-elected ones; standalone `web` takes
+  `--auth-htpasswd FILE`. `glow-web passwd USER` prints a line. The file
+  is re-read on change and fails closed on a loose mode, a non-bcrypt hash
+  or an empty file. Unix sockets stay ungated (mode 0600). A non-loopback
+  bind warns about cleartext. Rung 9.
+
+### Build
+
+- `go` floor 1.25 → 1.26: `golang.org/x/crypto` v0.58.0 (bcrypt) requires
+  it. New deps: `golang.org/x/crypto`, `golang.org/x/term` (no-echo
+  password prompt).
 
 ### Security
 

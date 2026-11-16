@@ -20,9 +20,12 @@ import (
 // from its predecessor: no fd passing, no re-registration.
 type Elector struct {
 	State     registry.State
-	Addr      string      // TCP listen spec for the hub, e.g. "127.0.0.1:7171"
-	AllowHost []string    // extra Host names for the TCP listener
-	NewHub    func() *Hub // builds the hub on winning; State/BaseURL are set by the Elector
+	Addr      string   // TCP listen spec for the hub, e.g. "127.0.0.1:7171"
+	AllowHost []string // extra Host names for the TCP listener
+	// Gate, when set, wraps the TCP listener only (auth, rung 9). hub.sock
+	// is 0600 and stays ungated so sessions can probe /_/hub.
+	Gate   func(http.Handler) http.Handler
+	NewHub func() *Hub // builds the hub on winning; State/BaseURL are set by the Elector
 	// Log, when set, receives one line per election event.
 	Log func(string)
 
@@ -71,7 +74,11 @@ func (e *Elector) TryOnce() (bool, error) {
 	// mutex, and they must not read the field (caught by -race).
 	errc := make(chan error, 2)
 	e.lock, e.hub, e.errc = lock, h, errc
-	public := &http.Server{Handler: HostCheck(h.Handler(), e.AllowHost)}
+	var inner http.Handler = h.Handler()
+	if e.Gate != nil {
+		inner = e.Gate(inner)
+	}
+	public := &http.Server{Handler: HostCheck(inner, e.AllowHost)}
 	private := &http.Server{Handler: h.Handler()}
 	e.srvs = []*http.Server{public, private}
 	go func() { errc <- public.Serve(tcp) }()

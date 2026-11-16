@@ -140,6 +140,27 @@ run/<name>.sock               proxy sessions' sockets
 run/hub.sock, run/hub.lock    the hub's socket and its election lock
 ```
 
+**Password protection (HTTP Basic, bcrypt).** Create
+`~/.local/state/glow-web/htpasswd` and every hub enforces it on its TCP
+port, whichever process holds the hub role. Remove the file to turn auth
+off; edits apply without a restart.
+
+```sh
+glow-web passwd ann >> ~/.local/state/glow-web/htpasswd   # prompts, no echo
+chmod 600 ~/.local/state/glow-web/htpasswd                 # loose modes are refused
+glow-web web . --auth-htpasswd FILE                        # standalone (non-hub) server
+```
+
+Only bcrypt lines are accepted (`glow-web passwd` or `htpasswd -nB`).
+Unix sockets stay ungated: their 0600 mode already limits them to you.
+Basic auth is cleartext on a LAN bind (glow-web warns about it), so put
+TLS in front.
+
+**Behind lmux.** Add `{"docs": {"sock": "~/.local/state/glow-web/run/hub.sock"}}`
+(as an absolute path) to `~/.local/state/lmux/promoted-services.json`, and
+every project is at `https://docs.lmux.test:8443/<name>/`, on the same paths
+as `127.0.0.1:7171`.
+
 Hub-related flags: `glow-web hub --addr 127.0.0.1:7171 --url-prefix /docs
 --allow-host docs.example`. Sessions take `--hub-addr` (or
 `GLOW_WEB_HUB_ADDR`), and `--hub-elect=false` stops a session from becoming
@@ -164,6 +185,7 @@ reaches the hub. Design and rationale: [`specs/unified-listener.md`](specs/unifi
                            Add port to distinguish instances: --title-prefix "glow-web:8080"
 --hub off                  off | lease | proxy | auto: join the host's hub (see "Hub")
 --name NAME                mount name under the hub (default: derived from PATH)
+--auth-htpasswd FILE       HTTP Basic (bcrypt htpasswd) on a TCP listener
 ```
 
 ## Status
