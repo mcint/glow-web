@@ -72,6 +72,9 @@ glow-web web . --addr 0.0.0.0:8080     # explicit form
 # Reverse-proxy mount
 glow-web web . --addr :8080 --url-prefix /docs
 
+# Unix socket (for Caddy/lmux `reverse_proxy unix//…`, or curl --unix-socket)
+glow-web web . --listen unix:/tmp/glow.sock --url-prefix /docs
+
 # Render to HTML on stdout
 glow-web render README.md --format html
 
@@ -89,6 +92,7 @@ glow-web version
 
 ```
 --addr 127.0.0.1:8080      loopback only by default; ":8080" or "0.0.0.0:8080" for LAN
+--listen unix:PATH         listen on a unix socket (0600) instead; also tcp:HOST:PORT
 --url-prefix /docs         mount under URL prefix for reverse-proxy use
 --gitignore=true           honor .gitignore (dir mode)
 --ignore-files .rgignore   comma-separated additional ignore-files

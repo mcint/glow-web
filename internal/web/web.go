@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/mcint/glow-web/internal/gitstatus"
+	"github.com/mcint/glow-web/internal/listen"
 	"github.com/mcint/glow-web/internal/render"
 	"github.com/mcint/glow-web/internal/version"
 	"github.com/mcint/glow-web/internal/walk"
@@ -99,17 +100,37 @@ func (s *Server) Handler() http.Handler {
 // and a bind failure surfaces before the misleading "serving …" notice.
 // The Server's Addr field is updated to the bound address so any
 // "auto"-style title prefix can interpolate the real port.
+//
+// addr is a listen spec (internal/listen): "HOST:PORT", "tcp:HOST:PORT"
+// or "unix:PATH".
 func (s *Server) Serve(addr string) error {
-	ln, err := net.Listen("tcp", addr)
+	ln, err := listen.Listen(addr)
 	if err != nil {
 		return err
 	}
-	s.Addr = ln.Addr().String()
+	return s.ServeListener(ln)
+}
+
+// ServeListener serves on an already-bound listener (TCP or unix) and
+// blocks. It prints the reachable URLs first.
+func (s *Server) ServeListener(ln net.Listener) error {
 	fmt.Fprintf(os.Stderr, "glow-web %s — serving %s\n", version.String(), s.Root)
-	for _, line := range s.listenerLines(s.Addr) {
-		fmt.Fprintln(os.Stderr, line)
+	if ln.Addr().Network() == "unix" {
+		// No port to put in the title; boundPort() yields "" for Addr="".
+		s.Addr = ""
+		fmt.Fprintln(os.Stderr, unixListenerLine(ln.Addr().String(), s.URLPrefix))
+	} else {
+		s.Addr = ln.Addr().String()
+		for _, line := range s.listenerLines(s.Addr) {
+			fmt.Fprintln(os.Stderr, line)
+		}
 	}
 	return http.Serve(ln, s.Handler())
+}
+
+// unixListenerLine prints the socket and a copy-pasteable curl for it.
+func unixListenerLine(path, urlPrefix string) string {
+	return fmt.Sprintf("    unix:%s  (curl --unix-socket %s http://localhost%s/)", path, path, urlPrefix)
 }
 
 // listenerLines formats one line per reachable URL for the bound address.

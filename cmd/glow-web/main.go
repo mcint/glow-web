@@ -61,6 +61,7 @@ func main() {
 func runWeb(args []string) {
 	fs := flag.NewFlagSet("web", flag.ExitOnError)
 	addr := fs.String("addr", "127.0.0.1:8080", `address to listen on (default loopback only; use ":8080" or "0.0.0.0:8080" to expose on LAN)`)
+	listenSpec := fs.String("listen", "", `listen spec, overrides --addr: "tcp:HOST:PORT" or "unix:PATH" (socket mode 0600; a dead socket file is replaced, a live one is refused)`)
 	prefix := fs.String("url-prefix", "", `mount under URL prefix, e.g. "/docs"`)
 	gitignore := fs.Bool("gitignore", true, "honor .gitignore (dir mode); use --gitignore=false to disable")
 	ignoreFiles := fs.String("ignore-files", "", "comma-separated additional ignore-files (relative to PATH or absolute)")
@@ -103,9 +104,12 @@ func runWeb(args []string) {
 	s.Theme = *theme
 	s.TitlePrefix = *titlePrefix
 	s.TitlePort = *titlePrefixPort
-	s.Addr = *addr
+	spec := *addr
+	if *listenSpec != "" {
+		spec = *listenSpec
+	}
 	s.LogLevel = lvl
-	if err := s.Serve(*addr); err != nil {
+	if err := s.Serve(spec); err != nil {
 		die(err)
 	}
 }

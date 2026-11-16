@@ -13,6 +13,14 @@ Freshness P1 (manual refresh + fresh/stale indicator) is spec'd in
 `specs/fresh-stale.md` but not yet implemented. A hover-expand variant of the
 segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
 
+### Added
+
+- `web --listen unix:PATH` (or `tcp:HOST:PORT`) serves on a unix-domain
+  socket, created mode 0600. A dead socket file left by a killed process is
+  replaced; a live one is refused; a non-socket file is never removed.
+  This is rung A of `specs/unified-listener.md`, and it lets lmux/Caddy
+  proxy by socket path.
+
 ### Changed
 
 - Sidebar now opens *beneath* the top bar, into the reading area, instead of
