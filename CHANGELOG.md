@@ -37,6 +37,14 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
   leases with their pid. The hub's `/_/hub` now reports its `url`.
   Rung 4 (B2).
 
+### Security
+
+- Saving (and `/_/render`) now refuses cross-origin browser requests
+  (`Sec-Fetch-Site` / `Origin`, via Go's `http.CrossOriginProtection`).
+  Before this, any web page could POST to a loopback glow-web and overwrite
+  a served file. The hub would have widened that to every published
+  project. Same-origin edits and curl are unaffected.
+
 ### Changed
 
 - Sidebar now opens *beneath* the top bar, into the reading area, instead of

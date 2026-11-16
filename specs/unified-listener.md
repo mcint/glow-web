@@ -269,6 +269,12 @@ instances, since the prefix is all the instance knows about.
 
 ## 5. Hub hygiene (applies to B–D)
 
+- Every state-changing request (save, `/_/render`) goes through
+  `http.CrossOriginProtection`, in `web.Server.Handler`, so standalone,
+  hub-mounted and proxied servers share one gate. A cross-site page can't
+  POST into a loopback glow-web. Same-origin fetches pass via
+  `Sec-Fetch-Site`, even when a front (lmux) rewrites Host; header-less
+  CLI clients pass. Shipped 2026-11-16 after a security review of rung 3.
 - Check `Host` against `localhost`, `127.0.0.1`, `[::1]`, `*.localhost`
   and an allow-list flag, in the hub only (DNS-rebinding guard).
 - Refuse a registry/runtime dir that is group- or world-writable or

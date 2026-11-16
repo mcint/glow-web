@@ -87,7 +87,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/_/render", s.handleRender)
 	mux.HandleFunc("/_/files", s.handleFiles)
 	mux.HandleFunc("/", s.handleRoot)
-	var h http.Handler = mux
+	// One gate for every state-changing request (save, /_/render): refuse
+	// cross-origin browser requests (Sec-Fetch-Site / Origin), so a page on
+	// another site can't POST into a loopback server. Safe methods and
+	// header-less clients (curl) pass unchanged.
+	var h http.Handler = http.NewCrossOriginProtection().Handler(mux)
 	if s.URLPrefix != "" {
 		h = http.StripPrefix(s.URLPrefix, h)
 	}
