@@ -120,8 +120,8 @@ auto-pruned.
 `run/<name>.json` (§4.V record) and holds an `flock` on it for as long
 as it runs. The hub serves that root **in-process** while the lock is
 held. When the process exits or crashes, the kernel drops the lock and
-the hub stops serving it (404 with "not open — last seen <time>"), then
-prunes the record. The session process does nothing but hold the lock:
+the hub stops serving it (a plain 404; the record is pruned on the next
+read, so there's no "last seen" to show) and the name is free again. The session process does nothing but hold the lock:
 no listener and no proxying, the narrowest path of all.
 
 - Trade-off: the root is rendered by the **hub's** binary and default
@@ -331,7 +331,10 @@ being *merged*, never on future ones.
 
 **Status** (2026-11-16): rung 1 done (`--listen`), rung 2 done (`glow-web
 name`), rung 3 done (`hub`, `publish`/`unpublish`/`ls`, ephemeral
-`web a/ b/`). Decided while building: N1 = refuse and name the holder; N7 =
+`web a/ b/`), rung 4 done (`web --hub=lease [--name]`; run records are
+written under a hidden temp name, flocked, then `link()`ed into place, so
+none is ever visible unlocked and two registrants can't overwrite each other;
+crash-tested with a SIGKILLed child). Decided while building: N1 = refuse and name the holder; N7 =
 7171. The registry is re-read per request (one ReadDir), not on an mtime
 check: simpler, and correct when a pin's target disappears. Under a hub,
 `--title-prefix` defaults to the mount name.

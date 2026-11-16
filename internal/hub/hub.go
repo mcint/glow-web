@@ -27,8 +27,11 @@ import (
 type Mount struct {
 	Name string `json:"name"`
 	Root string `json:"root"`
-	Kind string `json:"kind"` // "arg" (command line) or "pin" (registry mounts/)
+	Kind string `json:"kind"` // "arg" (command line), "lease" (run/ record) or "pin" (mounts/)
 	Live bool   `json:"live"`
+	// Session details for run-record mounts.
+	Version string `json:"version,omitempty"`
+	PID     int    `json:"pid,omitempty"`
 }
 
 // Hub routes /<name>/… to per-root servers.
@@ -36,7 +39,10 @@ type Hub struct {
 	State     *registry.State // nil: serve Extra only (ephemeral `web a/ b/`)
 	Extra     []Mount         // explicit roots; they win over pins of the same name
 	URLPrefix string          // hub mount point, e.g. "/docs"; "" for root
-	Walk      walk.Options    // template for every mount (Root is overwritten)
+	// BaseURL is how browsers reach the hub (e.g. "http://127.0.0.1:7171"),
+	// set once the TCP listener is bound; sessions print it via /_/hub.
+	BaseURL string
+	Walk    walk.Options // template for every mount (Root is overwritten)
 	// Configure applies shared flags (theme, read-only, …) to each new
 	// per-mount server. It may be nil.
 	Configure func(*web.Server)
@@ -64,6 +70,16 @@ func (h *Hub) Mounts() []Mount {
 		out = append(out, m)
 	}
 	if h.State != nil {
+		// Live run records (rung 4 lease). Registration already refused a
+		// record whose name a pin holds for another root, so a record
+		// here shadows only a pin of the same root.
+		for _, r := range h.State.Records() {
+			if seen[r.Name] || !r.Usable() || r.Mode() != "lease" {
+				continue
+			}
+			seen[r.Name] = true
+			out = append(out, Mount{Name: r.Name, Root: r.Root, Kind: "lease", Live: true, Version: r.Version, PID: r.PID})
+		}
 		pins, _ := h.State.Pins()
 		for _, p := range pins {
 			if seen[p.Name] {
@@ -161,6 +177,7 @@ type Status struct {
 	Hub     string  `json:"hub"`
 	Version string  `json:"version"`
 	Prefix  string  `json:"prefix"`
+	URL     string  `json:"url,omitempty"` // BaseURL + Prefix: mounts live at URL/<name>/
 	Mounts  []Mount `json:"mounts"`
 }
 
@@ -168,7 +185,14 @@ func (h *Hub) serveStatus(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(Status{Hub: "glow-web", Version: version.String(), Prefix: h.URLPrefix, Mounts: h.Mounts()})
+	_ = enc.Encode(Status{Hub: "glow-web", Version: version.String(), Prefix: h.URLPrefix, URL: h.urlOrEmpty(), Mounts: h.Mounts()})
+}
+
+func (h *Hub) urlOrEmpty() string {
+	if h.BaseURL == "" {
+		return ""
+	}
+	return h.BaseURL + h.URLPrefix
 }
 
 var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>

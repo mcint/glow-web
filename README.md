@@ -76,6 +76,7 @@ glow-web web . --addr :8080 --url-prefix /docs
 glow-web publish ~/dev-llm/glow-web      # prints the name: glow-web
 glow-web hub                             # http://127.0.0.1:7171/glow-web/
 glow-web ls                              # what's pinned, is the hub up
+glow-web web . --hub=lease               # served by the hub only while this runs
 glow-web web ~/a ~/b                     # ad hoc: /a/ and /b/ on one port
 
 # Unix socket (for Caddy/lmux `reverse_proxy unix//…`, or curl --unix-socket)

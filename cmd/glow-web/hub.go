@@ -1,15 +1,20 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/mcint/glow-web/internal/hub"
 	"github.com/mcint/glow-web/internal/listen"
@@ -86,7 +91,8 @@ func serveHub(h *hub.Hub, spec, sock string, allow []string, stateDir string) er
 	fmt.Fprintln(os.Stderr)
 	handler := h.Handler()
 	if ln.Addr().Network() == "tcp" {
-		fmt.Fprintf(os.Stderr, "    http://%s%s/\n", ln.Addr(), h.URLPrefix)
+		h.BaseURL = "http://" + ln.Addr().String()
+		fmt.Fprintf(os.Stderr, "    %s%s/\n", h.BaseURL, h.URLPrefix)
 		handler = hub.HostCheck(handler, allow)
 	} else {
 		fmt.Fprintf(os.Stderr, "    unix:%s\n", ln.Addr())
@@ -98,6 +104,58 @@ func serveHub(h *hub.Hub, spec, sock string, allow []string, stateDir string) er
 	}
 	go func() { errc <- http.Serve(ln, handler) }()
 	return <-errc
+}
+
+// runLease registers root with the hub as a lease (rung 4) and holds it
+// until SIGINT/SIGTERM: the hub serves root at /<name>/ exactly while this
+// process lives. Nothing is bound here.
+func runLease(root, name string) {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		die(err)
+	}
+	if _, err := os.Stat(abs); err != nil {
+		die(err)
+	}
+	if name == "" {
+		name = registry.NameFor(abs)
+	}
+	st := registry.DefaultState()
+	lease, err := st.Register(registry.Record{Name: name, Root: abs, Version: version.String()})
+	if err != nil {
+		die(err)
+	}
+	fmt.Fprintf(os.Stderr, "glow-web %s — leased %s as %q (served by the hub while this runs; Ctrl-C to release)\n", version.String(), abs, name)
+	if u := hubURL(st); u != "" {
+		fmt.Fprintf(os.Stderr, "    %s/%s/\n", u, name)
+	} else {
+		fmt.Fprintf(os.Stderr, "    no hub running yet: start `glow-web hub` (the lease is already registered)\n")
+	}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	<-sig
+	lease.Close()
+}
+
+// hubURL asks a running hub (over run/hub.sock) for its public URL.
+func hubURL(st registry.State) string {
+	sock := filepath.Join(st.RunDir(), "hub.sock")
+	c := &http.Client{Timeout: time.Second, Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", sock)
+		},
+	}}
+	resp, err := c.Get("http://hub/_/hub")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	var s hub.Status
+	if json.NewDecoder(resp.Body).Decode(&s) != nil || s.Hub != "glow-web" {
+		return ""
+	}
+	return s.URL
 }
 
 // argMounts names positional roots with NameFor, refusing duplicates.
@@ -169,6 +227,13 @@ func runLs(args []string) {
 			live = "missing"
 		}
 		fmt.Fprintf(tw, "%s\tpin\t%s\t%s\n", p.Name, live, p.Root)
+	}
+	for _, r := range st.Records() {
+		kind := r.Mode()
+		if !r.Usable() {
+			kind = fmt.Sprintf("contract-%d?", r.Contract)
+		}
+		fmt.Fprintf(tw, "%s\t%s\tpid %d\t%s\n", r.Name, kind, r.PID, r.Root)
 	}
 	tw.Flush()
 	hubLive := "not running"

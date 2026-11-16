@@ -31,6 +31,11 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
   `$XDG_STATE_HOME` override it). Changes apply without a hub restart.
   `glow-web web a/ b/` with several paths runs an ephemeral hub over just
   those. Rung 3 (B1).
+- `glow-web web PATH --hub=lease [--name NAME]` binds nothing. The running
+  hub serves PATH at `/<name>/` exactly while this process lives (a flocked
+  `run/<name>.json`, so even `kill -9` releases it). `glow-web ls` lists
+  leases with their pid. The hub's `/_/hub` now reports its `url`.
+  Rung 4 (B2).
 
 ### Changed
 
