@@ -55,6 +55,10 @@ type Server struct {
 	Addr           string       // bound address (e.g. "127.0.0.1:8080"); set by CLI and updated after net.Listen
 	LogLevel       LogLevel     // per-request access logging; LogOff (default) skips the middleware entirely
 	LogOut         io.Writer    // log destination; nil means os.Stderr
+	// HubURL is the hub's root when this server is mounted under a glow-web
+	// hub (e.g. "/" or "/docs/"); the location then starts with a "hub"
+	// crumb. Empty when standalone.
+	HubURL string
 }
 
 // NewServer constructs a Server, autodetecting Mode from path's stat. walkOpts
@@ -432,6 +436,7 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 		Name:        displayName,
 		Path:        displayPath(displayName, rel),
 		ParentHint:  s.parentHint(),
+		HubURL:      s.HubURL,
 		Crumbs:      s.crumbsForFile(rel, displayName),
 		Body:        template.HTML(body),
 		ViewURL:     selfURL,
@@ -526,6 +531,7 @@ func (s *Server) serveEdit(w http.ResponseWriter, src []byte, displayName, rel s
 		Name:        displayName,
 		Path:        displayPath(displayName, rel),
 		ParentHint:  s.parentHint(),
+		HubURL:      s.HubURL,
 		Crumbs:      s.crumbsForFile(rel, displayName),
 		Source:      string(src),
 		ViewURL:     selfURL,
@@ -819,6 +825,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		Title:       filepath.Base(s.Root),
 		Path:        displayRoot(s.Root),
 		ParentHint:  s.parentHint(),
+		HubURL:      s.HubURL,
 		Crumbs:      s.crumbsForIndex(prefixFilter),
 		Filter:      prefixFilter,
 		Files:       items,
@@ -1008,6 +1015,7 @@ type pageData struct {
 	Name        string
 	Path        string
 	ParentHint  string // path above the serving root, e.g. "~/dev-llm"; empty at "/"
+	HubURL      string // hub root when mounted under a hub; "" standalone
 	Crumbs      []crumb
 	Body        template.HTML
 	Source      string // edit page only
@@ -1052,6 +1060,7 @@ type indexData struct {
 	Title       string
 	Path        string  // home-relative project root, shown in footer
 	ParentHint  string  // path above the serving root, e.g. "~/dev-llm"; empty at "/"
+	HubURL      string  // hub root when mounted under a hub; "" standalone
 	Crumbs      []crumb // breadcrumb nav for current prefix filter
 	Filter      string  // current prefix filter (e.g. "sub/"); empty means root
 	Files       []indexItem

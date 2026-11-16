@@ -196,6 +196,7 @@ func (h *Hub) server(m Mount) (http.Handler, error) {
 		h.Configure(s)
 	}
 	s.URLPrefix = h.URLPrefix + "/" + m.Name
+	s.HubURL = h.URLPrefix + "/"
 	c := cached{key: key, h: s.Handler()}
 	h.servers[m.Name] = c
 	return c.h, nil

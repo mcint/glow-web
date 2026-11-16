@@ -2,6 +2,7 @@
 <div class="browser-loc">
   {{if .ParentHint}}<div class="parent-hint" aria-label="serving root context">{{.ParentHint}}/</div>{{end}}
   <nav class="crumbs" aria-label="path">
+    {{if .HubURL}}<a class="crumb crumb-hub" href="{{.HubURL}}" title="glow-web hub: every project on this host">hub</a><span class="crumb-sep">/</span>{{end}}
     {{range $i, $c := .Crumbs}}
       {{if $i}}<span class="crumb-sep">/</span>{{end}}
       {{if $c.URL}}<a class="crumb" href="{{$c.URL}}">{{$c.Name}}</a>

@@ -53,6 +53,9 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
   hub` joins the same election, so it can't collide with an elected session.
   `--hub-elect=false` opts out; `--hub-addr` / `GLOW_WEB_HUB_ADDR` sets the
   port. Rung 7 (D).
+- Pages served under a hub start their location with a **hub** crumb
+  (`hub / <project> / …`) that links to the hub index. README has a "Hub"
+  section covering pin/lease/proxy/auto, election and the state layout.
 
 ### Security
 

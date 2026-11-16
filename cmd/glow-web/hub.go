@@ -197,6 +197,7 @@ func runProxy(root, name string, sf *serverFlags, el *hub.Elector) {
 		hubPrefix = hs.Prefix
 	}
 	s.URLPrefix = hubPrefix + "/" + name
+	s.HubURL = hubPrefix + "/"
 
 	sockName := st.SockName(name)
 	ln, err := listen.Listen("unix:" + filepath.Join(st.RunDir(), sockName))

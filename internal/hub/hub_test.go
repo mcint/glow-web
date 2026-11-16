@@ -165,6 +165,9 @@ func TestHubPrefix(t *testing.T) {
 	if rec := get(h, "localhost", "/beta/"); rec.Code != 404 {
 		t.Errorf("unprefixed path should 404, got %d", rec.Code)
 	}
+	if body := get(h, "localhost", "/docs/beta/b.md").Body.String(); !strings.Contains(body, `<a class="crumb crumb-hub" href="/docs/"`) {
+		t.Error("mounted page lacks a hub crumb pointing at the hub root")
+	}
 }
 
 // DNS-rebinding guard: the TCP-facing handler only answers loopback names.
