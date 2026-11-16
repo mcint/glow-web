@@ -72,16 +72,8 @@ glow-web web . --addr 0.0.0.0:8080     # explicit form
 # Reverse-proxy mount
 glow-web web . --addr :8080 --url-prefix /docs
 
-# Many projects, one port: pin dirs, run one hub, each at /<name>/
-glow-web publish ~/dev-llm/glow-web      # prints the name: glow-web
-glow-web hub                             # http://127.0.0.1:7171/glow-web/
-glow-web ls                              # what's pinned, is the hub up
-glow-web web . --hub=lease               # served by the hub only while this runs
-glow-web web . --hub=proxy               # this process serves; the hub forwards to it
-glow-web web . --hub=auto                # lease if the hub is this exact build, else proxy
-# No `glow-web hub` running? The first --hub session becomes the hub; if it
-# exits, another session takes over the same port and URLs.
-glow-web web ~/a ~/b                     # ad hoc: /a/ and /b/ on one port
+# Many projects on one port, each at /<name>/ (see "Hub" below)
+glow-web web . --hub=auto                # http://127.0.0.1:7171/<this-dir>/
 
 # Unix socket (for Caddy/lmux `reverse_proxy unix//…`, or curl --unix-socket)
 glow-web web . --listen unix:/tmp/glow.sock --url-prefix /docs
@@ -99,6 +91,63 @@ glow-web slice specs/spec.md --heading "Architecture"
 glow-web version
 ```
 
+## Hub: many projects, one port
+
+One listener per host, every project at `/<name>/`, plus an index at `/`.
+The name is the directory's basename in kebab-case (`ClaudeCollab` →
+`claude-collab`, the same rule lmux uses); `glow-web name [PATH]` prints it,
+and `--name` overrides it. Every page under a hub starts its location with a
+**hub** crumb that links back to the index.
+
+There are three ways to put a directory on the hub. They differ only in how
+long it stays there:
+
+| how | command | served by | lives until |
+|---|---|---|---|
+| **pin** | `glow-web publish PATH [--name N]` | the hub, in-process | `glow-web unpublish N` |
+| **lease** | `glow-web web PATH --hub=lease` | the hub, in-process | this process exits (even `kill -9`) |
+| **proxy** | `glow-web web PATH --hub=proxy` | this process, on its own socket; the hub forwards to it | this process exits |
+
+`--hub=auto` picks for you: lease when the hub runs this exact build, else
+proxy. Proxy is the right choice for a `glow-web-dev` session beside a
+stable hub, or any time versions differ. The hub's index shows each mount's
+version and marks any that differ from the hub's.
+
+**No daemon is needed.** Any `--hub=…` session becomes the hub when none
+is running. If that session exits, another takes over within ~2s, on the same
+port and URLs. That works because everything the hub knows lives on disk.
+For an always-on site, run `glow-web hub` itself (e.g. under launchd): it
+joins the same election, so it never collides with a session.
+
+```sh
+glow-web publish ~/notes                 # pin: prints "notes"
+glow-web hub                             # http://127.0.0.1:7171/ (index) and /notes/
+cd ~/dev-llm/glow-web && glow-web web . --hub=auto
+glow-web ls                              # pins, leases, proxies, and the hub's pid
+glow-web unpublish notes                 # removes the link, never the dir
+glow-web web ~/a ~/b                     # ad hoc, no registry: /a/ and /b/ on one port
+curl --unix-socket ~/.local/state/glow-web/run/hub.sock http://localhost/_/hub   # JSON status
+```
+
+State lives in one dir, `~/.local/state/glow-web/` (`$GLOW_WEB_STATE_DIR` or
+`$XDG_STATE_HOME` override it), at 0700. glow-web refuses to use it if it is
+group- or world-writable.
+
+```
+mounts/<name> -> /abs/dir     pins (plain symlinks: `ln -s` works too)
+run/<name>.json               one per open session (flock = alive)
+run/<name>.sock               proxy sessions' sockets
+run/hub.sock, run/hub.lock    the hub's socket and its election lock
+```
+
+Hub-related flags: `glow-web hub --addr 127.0.0.1:7171 --url-prefix /docs
+--allow-host docs.example`. Sessions take `--hub-addr` (or
+`GLOW_WEB_HUB_ADDR`), and `--hub-elect=false` stops a session from becoming
+the hub. The TCP listener only answers to loopback Host names
+(`localhost`, `*.localhost`, `127.0.0.1`, `[::1]`) plus `--allow-host`. The
+unix socket is gated by its 0600 mode, which is how a front such as lmux
+reaches the hub. Design and rationale: [`specs/unified-listener.md`](specs/unified-listener.md).
+
 ## Web flags
 
 ```
@@ -113,6 +162,8 @@ glow-web version
 --theme auto               auto | light | dark (browser toggle overrides)
 --title-prefix glow-web    prepended to <title> as "<prefix>: <doc>"; "" disables.
                            Add port to distinguish instances: --title-prefix "glow-web:8080"
+--hub off                  off | lease | proxy | auto: join the host's hub (see "Hub")
+--name NAME                mount name under the hub (default: derived from PATH)
 ```
 
 ## Status
