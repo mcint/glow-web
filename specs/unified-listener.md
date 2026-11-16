@@ -347,7 +347,12 @@ session binds `run/<name>.sock` *before* registering, so the hub never sees
 a record without a socket. It reads the hub's prefix from `/_/hub` over
 `hub.sock` and never from a header. The proxy keeps Host, path, query,
 headers and body. The CSRF gate runs in the session, so it holds through
-the proxy). Decided while building: N1 = refuse and name the holder; N7 =
+the proxy), rung 6 done (contract v1 enforced. `--hub=auto` leases only on
+an exact version match with the hub and otherwise proxies, including when no
+hub is up yet, since a proxy works under any later hub on the same major.
+The index has a version column with a "≠ hub" marker. Unknown-major records
+are listed as `incompatible`, 502 with an explanation, never shadow a pin,
+and are never deleted). Decided while building: N1 = refuse and name the holder; N7 =
 7171. The registry is re-read per request (one ReadDir), not on an mtime
 check: simpler, and correct when a pin's target disappears. Under a hub,
 `--title-prefix` defaults to the mount name.

@@ -36,6 +36,9 @@ type Mount struct {
 	Version string `json:"version,omitempty"`
 	PID     int    `json:"pid,omitempty"`
 	Sock    string `json:"sock,omitempty"` // proxy mounts: the session's socket
+	// Contract is set for "incompatible" mounts: a record from a contract
+	// major this hub doesn't speak. Listed, never routed.
+	Contract int `json:"contract,omitempty"`
 }
 
 // Hub routes /<name>/… to per-root servers.
@@ -77,7 +80,8 @@ func (h *Hub) Mounts() []Mount {
 		// Live run records (rung 4 lease). Registration already refused a
 		// record whose name a pin holds for another root, so a record
 		// here shadows only a pin of the same root.
-		for _, r := range h.State.Records() {
+		records := h.State.Records()
+		for _, r := range records {
 			if seen[r.Name] || !r.Usable() {
 				continue
 			}
@@ -92,6 +96,16 @@ func (h *Hub) Mounts() []Mount {
 			}
 			seen[p.Name] = true
 			out = append(out, Mount{Name: p.Name, Root: p.Root, Kind: "pin", Live: p.Live})
+		}
+		// Last: records this hub can't read. They are surfaced so skew is
+		// visible, but never routed, and they never shadow a mount we can serve.
+		for _, r := range records {
+			if seen[r.Name] || r.Usable() {
+				continue
+			}
+			seen[r.Name] = true
+			out = append(out, Mount{Name: r.Name, Root: r.Root, Kind: "incompatible",
+				Version: r.Version, PID: r.PID, Contract: r.Contract})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -129,6 +143,11 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if !hasSlash {
 		http.Redirect(w, r, h.URLPrefix+"/"+name+"/", http.StatusMovedPermanently)
+		return
+	}
+	if m.Kind == "incompatible" {
+		http.Error(w, fmt.Sprintf("glow-web hub: %q was registered by glow-web %s using contract %d; this hub (%s) speaks contract %d. Restart the hub with a newer glow-web.",
+			name, m.Version, m.Contract, version.String(), registry.Contract), http.StatusBadGateway)
 		return
 	}
 	srv, err := h.server(m)
@@ -244,13 +263,16 @@ h1 { font-size: 1.2rem; } table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: .35rem .6rem; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 500; } a { color: var(--link); }
 .root { font-family: ui-monospace, monospace; font-size: .85em; color: var(--muted); word-break: break-all; }
-.dead { opacity: .5; } footer { color: var(--muted); font-size: .85em; margin-top: 1rem; }
+.dead { opacity: .5; } .skew { font-weight: 600; } .skew::after { content: " ≠ hub"; font-weight: 400; color: var(--muted); } footer { color: var(--muted); font-size: .85em; margin-top: 1rem; }
 </style></head><body>
 <h1>glow-web hub</h1>
 {{if .Mounts}}<table>
-<tr><th>name</th><th>kind</th><th>root</th></tr>
+<tr><th>name</th><th>kind</th><th>version</th><th>root</th></tr>
 {{range .Mounts}}<tr{{if not .Live}} class="dead"{{end}}>
-<td><a href="{{$.Prefix}}/{{.Name}}/">{{.Name}}</a></td><td>{{.Kind}}</td><td class="root">{{.Root}}{{if not .Live}} (missing){{end}}</td></tr>
+<td><a href="{{$.Prefix}}/{{.Name}}/">{{.Name}}</a></td>
+<td>{{.Kind}}{{if .Contract}} (contract {{.Contract}}){{end}}</td>
+<td>{{if .Version}}<span{{if ne .Version $.Version}} class="skew" title="differs from this hub ({{$.Version}})"{{end}}>{{.Version}}</span>{{end}}</td>
+<td class="root">{{.Root}}{{if and (not .Live) (ne .Kind "incompatible")}} (missing){{end}}</td></tr>
 {{end}}</table>
 {{else}}<p>Nothing mounted. <code>glow-web publish PATH</code> pins a directory here.</p>{{end}}
 <footer>glow-web {{.Version}} · <a href="{{.Prefix}}/_/hub">/_/hub</a></footer>

@@ -81,13 +81,18 @@ func runWeb(args []string) {
 	addr := fs.String("addr", "127.0.0.1:8080", `address to listen on (default loopback only; use ":8080" or "0.0.0.0:8080" to expose on LAN)`)
 	listenSpec := fs.String("listen", "", `listen spec, overrides --addr: "tcp:HOST:PORT" or "unix:PATH" (socket mode 0600; a dead socket file is replaced, a live one is refused)`)
 	prefix := fs.String("url-prefix", "", `mount under URL prefix, e.g. "/docs"`)
-	hubMode := fs.String("hub", "off", `join the host's glow-web hub instead of binding a port: "off" (default) | "lease" (the hub serves PATH at /<name>/ while this process runs) | "proxy" (this process serves PATH on its own socket; the hub forwards /<name>/ to it)`)
+	hubMode := fs.String("hub", "off", `join the host's glow-web hub instead of binding a port: "off" (default) | "lease" (the hub serves PATH at /<name>/ while this process runs) | "proxy" (this process serves PATH on its own socket; the hub forwards /<name>/ to it) | "auto" (lease when the hub runs this exact build, else proxy)`)
 	name := fs.String("name", "", "mount name under the hub (default: derived from PATH; see `glow-web name`)")
 	sf := addServerFlags(fs)
 	parseIntermixed(fs, args)
 	if fs.NArg() < 1 {
 		fmt.Fprintln(os.Stderr, "glow-web web: missing PATH (file or directory)")
 		os.Exit(2)
+	}
+	if *hubMode == "auto" {
+		hs, up := hubStatus(registry.DefaultState())
+		*hubMode = autoMode(up, hs.Version, version.String())
+		fmt.Fprintf(os.Stderr, "glow-web: --hub=auto → %s\n", *hubMode)
 	}
 	switch *hubMode {
 	case "off":
@@ -104,7 +109,7 @@ func runWeb(args []string) {
 		runProxy(fs.Arg(0), *name, sf)
 		return
 	default:
-		die(fmt.Errorf("--hub=%q: want off, lease or proxy", *hubMode))
+		die(fmt.Errorf("--hub=%q: want off, lease, proxy or auto", *hubMode))
 	}
 	spec := *addr
 	if *listenSpec != "" {

@@ -42,6 +42,11 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
   session dies, the URL is a 404; if its socket hangs, a 502 names the root.
   `--listen unix:` now explains an over-long socket path instead of
   failing with "invalid argument". Rung 5 (C).
+- `--hub=auto` leases when the hub runs this exact build and otherwise
+  proxies. Mixed versions (a `glow-web-dev` session beside stable ones)
+  just work. The hub index shows each session's version and flags skew.
+  Sessions from a newer run-record contract are listed as `incompatible`
+  and explained rather than routed. Rung 6 (V).
 
 ### Security
 

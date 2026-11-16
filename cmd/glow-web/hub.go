@@ -185,6 +185,16 @@ func runProxy(root, name string, sf *serverFlags) {
 	ln.Close()
 }
 
+// autoMode picks the --hub=auto behaviour. Lease only when the hub runs
+// this exact build: it renders a lease with its own code. Otherwise proxy,
+// which works with any hub on the same contract major (§4.V).
+func autoMode(hubUp bool, hubVersion, mine string) string {
+	if hubUp && hubVersion == mine {
+		return "lease"
+	}
+	return "proxy"
+}
+
 func printHubURL(st registry.State, name string) {
 	if hs, ok := hubStatus(st); ok && hs.URL != "" {
 		fmt.Fprintf(os.Stderr, "    %s/%s/\n", hs.URL, name)

@@ -78,6 +78,7 @@ glow-web hub                             # http://127.0.0.1:7171/glow-web/
 glow-web ls                              # what's pinned, is the hub up
 glow-web web . --hub=lease               # served by the hub only while this runs
 glow-web web . --hub=proxy               # this process serves; the hub forwards to it
+glow-web web . --hub=auto                # lease if the hub is this exact build, else proxy
 glow-web web ~/a ~/b                     # ad hoc: /a/ and /b/ on one port
 
 # Unix socket (for Caddy/lmux `reverse_proxy unix//…`, or curl --unix-socket)
