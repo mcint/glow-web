@@ -296,8 +296,12 @@ opens: the hub (dedicated, elected or ephemeral) and standalone `web`.
 - **Where the file lives: `~/.local/state/glow-web/htpasswd`, fate-shared
   with the registry.** When that file exists, *any* hub enforces it, so auth
   can't depend on which session won the election (a per-session flag would
-  make it a coin toss). `--auth-htpasswd FILE` names a file explicitly; it
-  is the only way standalone `web` turns auth on.
+  make it a coin toss). It is the **only** source of hub auth: `glow-web
+  hub` has no file flag, and `web --hub=…` refuses `--auth-htpasswd`
+  rather than ignoring it. Otherwise an explicitly-gated hub would hand
+  over to an ungated session the moment it exited (security review,
+  2026-11-16). `--auth-htpasswd FILE` is how standalone `web` and
+  `web a/ b/` turn auth on.
 - **Format:** Apache htpasswd lines `user:<bcrypt>` (`$2a$`/`$2b$`/`$2y$`),
   `#` comments and blank lines allowed. Other hash schemes (MD5-apr1, SHA1,
   crypt) are refused with a message, never silently accepted. Make lines
@@ -309,7 +313,10 @@ opens: the hub (dedicated, elected or ephemeral) and standalone `web`.
   user needs no restart.
 - **Cost:** bcrypt runs on purpose slowly and browsers resend credentials
   on every request. Verified credentials are cached by SHA-256 of
-  `user:password` until the file changes. A miss on an unknown user still
+  `user:password` until the file changes. A cache hit also requires the
+  user's *current* hash to equal the one it was verified against, so a
+  verify that raced a reload can't keep a removed user or an old password
+  alive (security review, 2026-11-16). A miss on an unknown user still
   runs one bcrypt compare against a dummy hash, so timing doesn't reveal
   which users exist.
 - **Unix sockets are not gated.** `hub.sock` and session sockets are mode

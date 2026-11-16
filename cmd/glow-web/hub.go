@@ -37,7 +37,6 @@ func runHub(args []string) {
 	listenSpec := fs.String("listen", "", `listen spec, overrides --addr: "tcp:HOST:PORT" or "unix:PATH"`)
 	prefix := fs.String("url-prefix", "", `mount the whole hub under a prefix, e.g. "/docs" (mounts then live at /docs/<name>/)`)
 	allowHost := fs.String("allow-host", "", "comma-separated extra Host names the TCP listener accepts (loopback names always are)")
-	authFile := fs.String("auth-htpasswd", "", "htpasswd file (bcrypt) for HTTP Basic on the TCP listener (default: <state>/htpasswd when it exists)")
 	sf := addServerFlags(fs)
 	parseIntermixed(fs, args)
 
@@ -59,7 +58,7 @@ func runHub(args []string) {
 	}
 	// The dedicated hub takes the same election lock as sessions do (rung
 	// 7), so it and an elected session can never both serve.
-	gate := hubGate(st, *authFile)
+	gate := hubGate(st)
 	el := &hub.Elector{State: st, Addr: spec, AllowHost: splitComma(*allowHost), Gate: gate.Wrap, NewHub: func() *hub.Hub { return h }}
 	won, err := el.TryOnce()
 	if err != nil {
@@ -91,7 +90,7 @@ func sessionElector(st registry.State, addr string, sf *serverFlags, on bool) *h
 	}
 	// An elected hub enforces the state dir's htpasswd exactly as a
 	// dedicated one would: auth doesn't depend on who won the election.
-	gate := hubGate(st, "")
+	gate := hubGate(st)
 	return &hub.Elector{
 		State:  st,
 		Addr:   addr,
@@ -101,14 +100,13 @@ func sessionElector(st registry.State, addr string, sf *serverFlags, on bool) *h
 	}
 }
 
-// hubGate is the hub's auth: an explicit file, else <state>/htpasswd when
-// it exists (fate-shared with the registry, spec §6). A bad file is fatal
-// at startup.
-func hubGate(st registry.State, explicit string) *auth.Gate {
+// hubGate is the hub's auth: <state>/htpasswd when it exists, and nothing
+// else. There is one source, fate-shared with the registry (spec §6),
+// because any process may hold the hub role next. A per-process file would
+// switch auth off at the first handover (security review, 2026-11-16).
+// A bad file is fatal at startup.
+func hubGate(st registry.State) *auth.Gate {
 	g := &auth.Gate{Path: filepath.Join(st.Dir, "htpasswd"), Optional: true}
-	if explicit != "" {
-		g = &auth.Gate{Path: explicit}
-	}
 	if err := g.Check(); err != nil {
 		die(err)
 	}
@@ -300,6 +298,17 @@ func runProxy(root, name string, sf *serverFlags, el *hub.Elector) {
 	lease.Close()
 	ln.Close()
 	leave()
+}
+
+// checkAuthFlag refuses --auth-htpasswd on hub-joining sessions. A hub's
+// auth comes only from <state>/htpasswd, so a per-session file would be
+// silently dropped. Saying so beats ignoring it.
+func checkAuthFlag(hubMode, authFile string) error {
+	if hubMode == "off" || authFile == "" {
+		return nil
+	}
+	return fmt.Errorf("--auth-htpasswd can't be combined with --hub=%s: a hub's auth comes only from the state dir's htpasswd (%s), so it holds whichever process is the hub. Put the users there instead",
+		hubMode, filepath.Join(registry.DefaultState().Dir, "htpasswd"))
 }
 
 // autoMode picks the --hub=auto behaviour. Lease only when the hub runs

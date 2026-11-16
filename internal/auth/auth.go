@@ -44,7 +44,7 @@ type Gate struct {
 	users  map[string][]byte // user → bcrypt hash
 	err    error             // load error: fail closed while set
 	loaded bool
-	ok     map[[32]byte]string // sha256(user:pass) → user, verified; cleared on reload
+	ok     map[[32]byte]string // sha256(user\0pass) → the hash it verified against; cleared on reload
 }
 
 // Check loads the file now and reports any configuration problem. It is
@@ -84,13 +84,17 @@ func (g *Gate) Wrap(next http.Handler) http.Handler {
 
 func (g *Gate) verify(users map[string][]byte, user, pass string) bool {
 	key := sha256.Sum256([]byte(user + "\x00" + pass))
+	hash, known := users[user]
+	// A cache hit counts only if this request's users still hold the very
+	// hash it was verified against. A verify that raced a reload may have
+	// cached against the old file, and that entry must not outlive a
+	// removed user or a changed password (security review, 2026-11-16).
 	g.mu.Lock()
-	if u, hit := g.ok[key]; hit && u == user {
+	if cached, hit := g.ok[key]; hit && known && cached == string(hash) {
 		g.mu.Unlock()
 		return true
 	}
 	g.mu.Unlock()
-	hash, known := users[user]
 	if !known {
 		_ = bcrypt.CompareHashAndPassword(dummy(), []byte(pass))
 		return false
@@ -100,7 +104,7 @@ func (g *Gate) verify(users map[string][]byte, user, pass string) bool {
 	}
 	g.mu.Lock()
 	if g.ok != nil {
-		g.ok[key] = user
+		g.ok[key] = string(hash)
 	}
 	g.mu.Unlock()
 	return true

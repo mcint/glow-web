@@ -98,6 +98,9 @@ func runWeb(args []string) {
 		fmt.Fprintln(os.Stderr, "glow-web web: missing PATH (file or directory)")
 		os.Exit(2)
 	}
+	if err := checkAuthFlag(*hubMode, *authFile); err != nil {
+		die(err)
+	}
 	var el *hub.Elector
 	if *hubMode != "off" {
 		el = sessionElector(registry.DefaultState(), *hubAddr, sf, *elect)

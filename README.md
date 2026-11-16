@@ -148,7 +148,7 @@ off; edits apply without a restart.
 ```sh
 glow-web passwd ann >> ~/.local/state/glow-web/htpasswd   # prompts, no echo
 chmod 600 ~/.local/state/glow-web/htpasswd                 # loose modes are refused
-glow-web web . --auth-htpasswd FILE                        # standalone (non-hub) server
+glow-web web . --auth-htpasswd FILE                        # standalone (non-hub) only
 ```
 
 Only bcrypt lines are accepted (`glow-web passwd` or `htpasswd -nB`).
