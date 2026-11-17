@@ -77,6 +77,9 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
   stored values fail closed. `ls` and the hub index show a write column.
   (This supersedes the interim `readonly` record field, which fixed
   `web --hub=lease --readonly` being writable through the hub.)
+- Lease run records are contract 2: a hub from before write policy refuses
+  them (listed as incompatible) instead of serving them writable. Proxy
+  records stay contract 1 and still work under old hubs.
 
 ### Build
 

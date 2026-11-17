@@ -13,11 +13,22 @@ import (
 	"time"
 )
 
-// Contract is the run-record contract major this binary speaks
-// (specs/unified-listener.md §4.V). The hub routes records with the same
-// major whatever their glow-web version. Adding fields is a minor change;
-// removing or renaming one bumps this.
-const Contract = 1
+// Run-record contract majors (specs/unified-listener.md §4.V). A hub routes
+// records whose major it speaks, whatever their glow-web version. Adding
+// fields is a minor change; changing what a record *means* bumps the major.
+const (
+	// ContractProxy: proxy records. The hub only forwards to the
+	// session's socket, so every hub since v1 routes them correctly.
+	ContractProxy = 1
+	// ContractLease: lease records since write policy. The hub renders the
+	// root itself and must honour "writable". Hubs that predate it speak
+	// only 1 and would serve the lease with their old writable default, so
+	// they must refuse these records, and an unknown major makes them
+	// do so (security review, 2026-11-16).
+	ContractLease = 2
+	// Contract is the newest major this build speaks; it accepts 1..Contract.
+	Contract = ContractLease
+)
 
 // Record is run/<name>.json: one open session. It is live exactly while
 // its writer holds an flock on the file, so a crash releases it without
@@ -37,7 +48,9 @@ type Record struct {
 }
 
 // Usable reports whether this binary understands the record's contract.
-func (r Record) Usable() bool { return r.Contract == Contract }
+// A contract-1 lease predates write policy: it has no "writable" and is
+// served read-only.
+func (r Record) Usable() bool { return r.Contract >= 1 && r.Contract <= Contract }
 
 // Mode is "proxy" when the session serves its own socket, else "lease".
 func (r Record) Mode() string {
@@ -93,7 +106,11 @@ func (s State) Register(rec Record) (*Lease, error) {
 			return nil, fmt.Errorf("name %q is published for %s; pick another with --name", rec.Name, p.Root)
 		}
 	}
-	rec.Contract, rec.PID, rec.Started = Contract, os.Getpid(), time.Now().UTC().Truncate(time.Second)
+	rec.Contract = ContractLease
+	if rec.Sock != "" {
+		rec.Contract = ContractProxy
+	}
+	rec.PID, rec.Started = os.Getpid(), time.Now().UTC().Truncate(time.Second)
 	body, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return nil, err

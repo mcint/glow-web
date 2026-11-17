@@ -56,7 +56,7 @@ only make things stricter.
 | standalone `web PATH` | its `--writable` | `no` |
 | `web a/ b/`, `hub a/ b/` (arg roots) | that process's `--writable` | `no` |
 | pin | `glow-web publish PATH --writable=V` → file `<state>/writable/<name>` holding `V` | `no` (no file) |
-| lease | the session's `--writable`, in its run record (`"writable"`, additive v1 field) | `no` |
+| lease | the session's `--writable`, in its run record (`"writable"`; lease records are **contract 2**, so pre-policy hubs refuse rather than serve them writable) | `no` |
 | proxy | the session serves itself with its own `--writable` | `no` |
 
 - A hub never applies its *own* `--writable` to pins or leases, only to its

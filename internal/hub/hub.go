@@ -151,7 +151,7 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if m.Kind == "incompatible" {
-		http.Error(w, fmt.Sprintf("glow-web hub: %q was registered by glow-web %s using contract %d; this hub (%s) speaks contract %d. Restart the hub with a newer glow-web.",
+		http.Error(w, fmt.Sprintf("glow-web hub: %q was registered by glow-web %s using contract %d; this hub (%s) speaks contracts 1-%d. Restart the hub with a newer glow-web.",
 			name, m.Version, m.Contract, version.String(), registry.Contract), http.StatusBadGateway)
 		return
 	}

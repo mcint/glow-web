@@ -193,6 +193,7 @@ its prefix). Nothing else. The rendering, templates and routes under
 | lease record, versions differ | `--hub=auto` instances never write this: they open a socket and go to proxy. If one exists anyway (written with `--hub=lease`), serve it in-process and mark it "rendered by hub vX" in the index |
 | unknown `contract` major | don't route; index lists it as "incompatible (contract N)" with both versions |
 | unknown fields | ignore (adding fields is a minor change; removing or renaming one is a major change) |
+| **contract 2** (lease records since write policy, 2026-11-16) | the hub renders the root and must honour `writable`. Pre-policy hubs speak only 1, so they list these leases as incompatible instead of serving them writable by their old default. Proxy records stay contract 1, since forwarding didn't change and old hubs still route them. A contract-1 lease (old session) is served read-only. Verified against a real `a7f2fb6` hub. |
 
 Consequences:
 
