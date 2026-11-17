@@ -123,7 +123,11 @@ func runWeb(args []string) {
 		if fs.NArg() > 1 {
 			die(fmt.Errorf("--hub=lease takes one PATH"))
 		}
-		runLease(fs.Arg(0), *name, *sf.readonly, el)
+		wp, err := sf.writePolicy()
+		if err != nil {
+			die(err)
+		}
+		runLease(fs.Arg(0), *name, wp, el)
 		return
 	case "proxy":
 		if fs.NArg() > 1 {
@@ -142,7 +146,11 @@ func runWeb(args []string) {
 	// Several roots: an ephemeral hub over just these, each at /<name>/.
 	// It reads no registry and binds no hub.sock.
 	if fs.NArg() > 1 {
-		extra, err := argMounts(fs.Args())
+		wp, err := sf.writePolicy()
+		if err != nil {
+			die(err)
+		}
+		extra, err := argMounts(fs.Args(), wp)
 		if err != nil {
 			die(err)
 		}

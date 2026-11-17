@@ -9,6 +9,11 @@ While we're pre-1.0, minors are allowed to break things; patches will not.
 
 ## [Unreleased]
 
+**Breaking:** glow-web is now read-only by default. Pass `--writable=md`
+(or `yes`) to get the Edit page and saving back. `--readonly` still works
+and means `--writable=no`. lmux-spawned servers become read-only too until
+lmux passes a value. See `specs/write-policy.md`.
+
 Freshness P1 (manual refresh + fresh/stale indicator) is spec'd in
 `specs/fresh-stale.md` but not yet implemented. A hover-expand variant of the
 segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
@@ -63,10 +68,15 @@ segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
   is re-read on change and fails closed on a loose mode, a non-bcrypt hash
   or an empty file. Unix sockets stay ungated (mode 0600). A non-loopback
   bind warns about cleartext. Rung 9.
-- `web --hub=lease --readonly` is now read-only through the hub too: the
-  flag travels in the run record (`"readonly"`, an additive v1 field), and
-  the hub can only tighten with it. Before this, the lease was silently
-  writable.
+- Write policy: `--writable=no|md|yes` (alias `--writeable`), default
+  `no`. It belongs to each mount's owner: standalone and arg roots take
+  their process flag, pins take `publish --writable` (stored in
+  `<state>/writable/<name>`), leases carry it in their run record, and
+  proxies serve themselves. A hub never applies its own flag to pins or
+  leases, so an elected session can't widen anyone's mount. Unrecognized
+  stored values fail closed. `ls` and the hub index show a write column.
+  (This supersedes the interim `readonly` record field, which fixed
+  `web --hub=lease --readonly` being writable through the hub.)
 
 ### Build
 

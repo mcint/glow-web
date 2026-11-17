@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mcint/glow-web/internal/policy"
 )
 
 // A page on another site can send a "simple" POST to a loopback glow-web
@@ -15,6 +17,7 @@ import (
 // page and header-less CLI clients still work.
 func TestSave_CrossSiteRefused(t *testing.T) {
 	dir, s := dirFixture(t)
+	s.Writable = policy.MD // saving/editing is opt-in (specs/write-policy.md)
 	before, _ := os.ReadFile(filepath.Join(dir, "alpha.md"))
 
 	for _, hdr := range []map[string]string{
@@ -39,6 +42,7 @@ func TestSave_CrossSiteRefused(t *testing.T) {
 
 func TestSave_SameOriginAndCLIAllowed(t *testing.T) {
 	_, s := dirFixture(t)
+	s.Writable = policy.MD // saving/editing is opt-in (specs/write-policy.md)
 	req := httptest.NewRequest("POST", "http://127.0.0.1:7171/alpha.md", strings.NewReader("# Mine\n"))
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	req.Header.Set("Origin", "http://127.0.0.1:7171")

@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/mcint/glow-web/internal/policy"
 	"github.com/mcint/glow-web/internal/registry"
 	"github.com/mcint/glow-web/internal/version"
 	"github.com/mcint/glow-web/internal/walk"
@@ -39,9 +40,10 @@ type Mount struct {
 	// Contract is set for "incompatible" mounts: a record from a contract
 	// major this hub doesn't speak. Listed, never routed.
 	Contract int `json:"contract,omitempty"`
-	// ReadOnly is the session's --readonly (lease records). The hub
-	// serves the mount read-only if either side asks.
-	ReadOnly bool `json:"readonly,omitempty"`
+	// Writable is the mount owner's raw write policy (specs/write-policy.md
+	// §3): an arg root's process flag, a lease's record, or a pin's
+	// writable/<name>. Parsed leniently; "" or unknown is read-only.
+	Writable string `json:"writable,omitempty"`
 }
 
 // Hub routes /<name>/… to per-root servers.
@@ -90,7 +92,7 @@ func (h *Hub) Mounts() []Mount {
 			}
 			seen[r.Name] = true
 			out = append(out, Mount{Name: r.Name, Root: r.Root, Kind: r.Mode(), Live: true,
-				Version: r.Version, PID: r.PID, Sock: h.State.SockPath(r), ReadOnly: r.ReadOnly})
+				Version: r.Version, PID: r.PID, Sock: h.State.SockPath(r), Writable: r.Writable})
 		}
 		pins, _ := h.State.Pins()
 		for _, p := range pins {
@@ -98,7 +100,7 @@ func (h *Hub) Mounts() []Mount {
 				continue
 			}
 			seen[p.Name] = true
-			out = append(out, Mount{Name: p.Name, Root: p.Root, Kind: "pin", Live: p.Live})
+			out = append(out, Mount{Name: p.Name, Root: p.Root, Kind: "pin", Live: p.Live, Writable: p.Writable})
 		}
 		// Last: records this hub can't read. They are surfaced so skew is
 		// visible, but never routed, and they never shadow a mount we can serve.
@@ -176,7 +178,7 @@ func (h *Hub) lookup(name string) (Mount, bool) {
 func (h *Hub) server(m Mount) (http.Handler, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	key := fmt.Sprintf("%s|%s|%s|%t", m.Kind, m.Root, m.Sock, m.ReadOnly)
+	key := fmt.Sprintf("%s|%s|%s|%s", m.Kind, m.Root, m.Sock, m.Writable)
 	if c, ok := h.servers[m.Name]; ok && c.key == key {
 		return c.h, nil
 	}
@@ -198,8 +200,10 @@ func (h *Hub) server(m Mount) (http.Handler, error) {
 	if h.Configure != nil {
 		h.Configure(s)
 	}
-	// A lease can tighten the hub's policy, never loosen it.
-	s.ReadOnly = s.ReadOnly || m.ReadOnly
+	// The mount's owner decides, never the hub process: applied after
+	// Configure, so an elected hub's own --writable can't widen anyone
+	// else's mount (specs/write-policy.md §3).
+	s.Writable = policy.Lenient(m.Writable)
 	s.URLPrefix = h.URLPrefix + "/" + m.Name
 	s.HubURL = h.URLPrefix + "/"
 	c := cached{key: key, h: s.Handler()}
@@ -257,7 +261,20 @@ func (h *Hub) urlOrEmpty() string {
 	return h.BaseURL + h.URLPrefix
 }
 
-var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
+// writeLabel is the index's write column: the effective policy, plus the
+// raw value when it wasn't recognized (and so fell back to read-only).
+func writeLabel(m Mount) string {
+	if m.Kind == "proxy" {
+		return "(session's)"
+	}
+	eff := policy.Lenient(m.Writable).String()
+	if m.Writable != "" && m.Writable != eff {
+		return eff + " (unrecognized: " + m.Writable + ")"
+	}
+	return eff
+}
+
+var indexTmpl = template.Must(template.New("index").Funcs(template.FuncMap{"writeLabel": writeLabel}).Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>glow-web hub</title>
@@ -273,10 +290,11 @@ th { color: var(--muted); font-weight: 500; } a { color: var(--link); }
 </style></head><body>
 <h1>glow-web hub</h1>
 {{if .Mounts}}<table>
-<tr><th>name</th><th>kind</th><th>version</th><th>root</th></tr>
+<tr><th>name</th><th>kind</th><th>write</th><th>version</th><th>root</th></tr>
 {{range .Mounts}}<tr{{if not .Live}} class="dead"{{end}}>
 <td><a href="{{$.Prefix}}/{{.Name}}/">{{.Name}}</a></td>
 <td>{{.Kind}}{{if .Contract}} (contract {{.Contract}}){{end}}</td>
+<td class="write">{{writeLabel .}}</td>
 <td>{{if .Version}}<span{{if ne .Version $.Version}} class="skew" title="differs from this hub ({{$.Version}})"{{end}}>{{.Version}}</span>{{end}}</td>
 <td class="root">{{.Root}}{{if and (not .Live) (ne .Kind "incompatible")}} (missing){{end}}</td></tr>
 {{end}}</table>

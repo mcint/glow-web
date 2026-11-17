@@ -53,7 +53,9 @@ glow-web web PATH [flags]                        serve file OR directory
     --url-prefix /docs                           mount under prefix (reverse-proxy)
     --gitignore=true                             honor .gitignore (dir mode)
     --ignore-files .rgignore,.glowignore         additional ignore-files
-    --readonly                                   disable edit + save
+    --writable no|md|yes                         what browsers may save; default no
+                                                 (read-only). specs/write-policy.md
+    --readonly                                   same as --writable=no
     --markup                                     default to hybrid markup view
     --title-prefix glow-web                      <title> as "<prefix>: <doc>"; "" disables
     --log-level off|dot|info                     access log: silent | "." per req | full line

@@ -120,7 +120,7 @@ For an always-on site, run `glow-web hub` itself (e.g. under launchd): it
 joins the same election, so it never collides with a session.
 
 ```sh
-glow-web publish ~/notes                 # pin: prints "notes"
+glow-web publish ~/notes                 # pin (read-only): prints "notes"
 glow-web hub                             # http://127.0.0.1:7171/ (index) and /notes/
 cd ~/dev-llm/glow-web && glow-web web . --hub=auto
 glow-web ls                              # pins, leases, proxies, and the hub's pid
@@ -138,6 +138,16 @@ mounts/<name> -> /abs/dir     pins (plain symlinks: `ln -s` works too)
 run/<name>.json               one per open session (flock = alive)
 run/<name>.sock               proxy sessions' sockets
 run/hub.sock, run/hub.lock    the hub's socket and its election lock
+writable/<name>               a pin's write policy (absent = read-only)
+```
+
+**Read-only by default.** Every mount is read-only unless its owner opts in
+with `--writable=md` (or `yes`), and a hub never widens anyone's mount:
+
+```sh
+glow-web publish ~/notes --writable=md    # pin's policy → <state>/writable/notes
+glow-web web . --hub=auto --writable=md   # a session's policy travels with its lease
+ls ~/.local/state/glow-web/writable/      # exactly the pins that accept writes
 ```
 
 **Password protection (HTTP Basic, bcrypt).** Create
@@ -177,7 +187,8 @@ reaches the hub. Design and rationale: [`specs/unified-listener.md`](specs/unifi
 --url-prefix /docs         mount under URL prefix for reverse-proxy use
 --gitignore=true           honor .gitignore (dir mode)
 --ignore-files .rgignore   comma-separated additional ignore-files
---readonly                 disable the edit page and save endpoint
+--writable no|md|yes       what the browser may save (default no: read-only; md = markdown);
+                           alias --writeable. --readonly = --writable=no
 --markup                   default to hybrid markup view
 --palette=true             ⌘K / Ctrl-K command palette (default on)
 --theme auto               auto | light | dark (browser toggle overrides)

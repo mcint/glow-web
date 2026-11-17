@@ -3,6 +3,8 @@ package web_test
 import (
 	"strings"
 	"testing"
+
+	"github.com/mcint/glow-web/internal/policy"
 )
 
 // Under a hub, the location starts with a link to the hub root, just
@@ -10,6 +12,7 @@ import (
 // outermost scope (specs/header-layout.md). Standalone, there is no link.
 func TestHubCrumb_PresentUnderHubOnEveryView(t *testing.T) {
 	_, s := dirFixture(t)
+	s.Writable = policy.MD // saving/editing is opt-in (specs/write-policy.md)
 	s.HubURL = "/docs/"
 	h := s.Handler()
 	for _, path := range []string{"/", "/alpha.md", "/alpha.md?edit=1"} {

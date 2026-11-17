@@ -1,8 +1,11 @@
 package main
 
 import (
+	"flag"
 	"strings"
 	"testing"
+
+	"github.com/mcint/glow-web/internal/policy"
 )
 
 // Rung 6: --hub=auto leases only when the hub runs this exact build (it
@@ -38,6 +41,42 @@ func TestAuthFlagWithHubRefused(t *testing.T) {
 		err := checkAuthFlag(m, "/x/htpasswd")
 		if err == nil || !strings.Contains(err.Error(), "htpasswd") || !strings.Contains(err.Error(), "state") {
 			t.Errorf("--hub=%s with --auth-htpasswd: err = %v, want refusal naming <state>/htpasswd", m, err)
+		}
+	}
+}
+
+// specs/write-policy.md §2: --writable=no|md|yes (alias --writeable),
+// default no; --readonly is --writable=no and conflicts with anything else.
+func TestWritableFlags(t *testing.T) {
+	cases := []struct {
+		args    []string
+		want    policy.Write
+		wantErr string
+	}{
+		{nil, policy.No, ""},
+		{[]string{"--writable=md"}, policy.MD, ""},
+		{[]string{"--writeable=yes"}, policy.Yes, ""},
+		{[]string{"--readonly"}, policy.No, ""},
+		{[]string{"--readonly", "--writable=no"}, policy.No, ""},
+		{[]string{"--readonly", "--writable=md"}, policy.No, "--readonly"},
+		{[]string{"--writable=md", "--writeable=yes"}, policy.No, "both"},
+		{[]string{"--writable=bogus"}, policy.No, "no|md|yes"},
+	}
+	for _, c := range cases {
+		fs := flag.NewFlagSet("t", flag.ContinueOnError)
+		sf := addServerFlags(fs)
+		if err := fs.Parse(c.args); err != nil {
+			t.Fatalf("%v: parse: %v", c.args, err)
+		}
+		got, err := sf.writePolicy()
+		if c.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("%v: err = %v, want containing %q", c.args, err, c.wantErr)
+			}
+			continue
+		}
+		if err != nil || got != c.want {
+			t.Errorf("%v: got %v, %v; want %v", c.args, got, err, c.want)
 		}
 	}
 }

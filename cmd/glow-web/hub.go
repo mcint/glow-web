@@ -22,6 +22,7 @@ import (
 	"github.com/mcint/glow-web/internal/auth"
 	"github.com/mcint/glow-web/internal/hub"
 	"github.com/mcint/glow-web/internal/listen"
+	"github.com/mcint/glow-web/internal/policy"
 	"github.com/mcint/glow-web/internal/registry"
 	"github.com/mcint/glow-web/internal/version"
 	"github.com/mcint/glow-web/internal/web"
@@ -44,7 +45,11 @@ func runHub(args []string) {
 	if err := st.Ensure(); err != nil {
 		die(err)
 	}
-	extra, err := argMounts(fs.Args())
+	wp, err := sf.writePolicy()
+	if err != nil {
+		die(err)
+	}
+	extra, err := argMounts(fs.Args(), wp)
 	if err != nil {
 		die(err)
 	}
@@ -220,7 +225,7 @@ func serveEphemeral(h *hub.Hub, spec string, gate *auth.Gate) error {
 // runLease registers root with the hub as a lease (rung 4) and holds it
 // until SIGINT/SIGTERM: the hub serves root at /<name>/ exactly while this
 // process lives. Nothing is bound here.
-func runLease(root, name string, readOnly bool, el *hub.Elector) {
+func runLease(root, name string, wp policy.Write, el *hub.Elector) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		die(err)
@@ -232,7 +237,7 @@ func runLease(root, name string, readOnly bool, el *hub.Elector) {
 		name = registry.NameFor(abs)
 	}
 	st := registry.DefaultState()
-	lease, err := st.Register(registry.Record{Name: name, Root: abs, Version: version.String(), ReadOnly: readOnly})
+	lease, err := st.Register(registry.Record{Name: name, Root: abs, Version: version.String(), Writable: wp.String()})
 	if err != nil {
 		die(err)
 	}
@@ -357,7 +362,7 @@ func hubStatus(st registry.State) (hub.Status, bool) {
 }
 
 // argMounts names positional roots with NameFor, refusing duplicates.
-func argMounts(paths []string) ([]hub.Mount, error) {
+func argMounts(paths []string, wp policy.Write) ([]hub.Mount, error) {
 	var out []hub.Mount
 	seen := map[string]string{}
 	for _, p := range paths {
@@ -373,7 +378,7 @@ func argMounts(paths []string) ([]hub.Mount, error) {
 			return nil, fmt.Errorf("%s and %s both mount as %q; publish one under another name (glow-web publish PATH --name NAME)", prev, abs, n)
 		}
 		seen[n] = abs
-		out = append(out, hub.Mount{Name: n, Root: abs})
+		out = append(out, hub.Mount{Name: n, Root: abs, Writable: wp.String()})
 	}
 	return out, nil
 }
@@ -381,6 +386,7 @@ func argMounts(paths []string) ([]hub.Mount, error) {
 func runPublish(args []string) {
 	fs := flag.NewFlagSet("publish", flag.ExitOnError)
 	name := fs.String("name", "", "mount name (default: derived from PATH; see `glow-web name`)")
+	writable := writableFlag(fs)
 	parseIntermixed(fs, args)
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: glow-web publish PATH [--name NAME]")
@@ -390,6 +396,15 @@ func runPublish(args []string) {
 	n, err := st.Publish(fs.Arg(0), *name)
 	if err != nil {
 		die(err)
+	}
+	// Only an explicit --writable changes a pin's policy; re-publishing
+	// without it leaves the current one alone.
+	explicit := false
+	fs.Visit(func(f *flag.Flag) { explicit = explicit || f.Name == "writable" || f.Name == "writeable" })
+	if explicit {
+		if err := st.SetPinWritable(n, *writable); err != nil {
+			die(err)
+		}
 	}
 	fmt.Println(n)
 	fmt.Fprintf(os.Stderr, "published: http://%s/%s/ (when `glow-web hub` runs on the default address)\n", DefaultHubAddr, n)
@@ -418,20 +433,24 @@ func runLs(args []string) {
 		die(err)
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tKIND\tLIVE\tROOT")
+	fmt.Fprintln(tw, "NAME\tKIND\tWRITE\tLIVE\tROOT")
 	for _, p := range pins {
 		live := "yes"
 		if !p.Live {
 			live = "missing"
 		}
-		fmt.Fprintf(tw, "%s\tpin\t%s\t%s\n", p.Name, live, p.Root)
+		fmt.Fprintf(tw, "%s\tpin\t%s\t%s\t%s\n", p.Name, policy.Lenient(p.Writable), live, p.Root)
 	}
 	for _, r := range st.Records() {
 		kind := r.Mode()
 		if !r.Usable() {
 			kind = fmt.Sprintf("contract-%d?", r.Contract)
 		}
-		fmt.Fprintf(tw, "%s\t%s\tpid %d\t%s\n", r.Name, kind, r.PID, r.Root)
+		write := policy.Lenient(r.Writable).String()
+		if r.Mode() == "proxy" {
+			write = "(session)"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\tpid %d\t%s\n", r.Name, kind, write, r.PID, r.Root)
 	}
 	tw.Flush()
 	hubLive := "not running"

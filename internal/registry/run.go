@@ -29,10 +29,10 @@ type Record struct {
 	PID      int    `json:"pid"`
 	Version  string `json:"version"`
 	Sock     string `json:"sock,omitempty"` // proxy mode: socket file name in run/; empty = lease
-	// ReadOnly carries the session's --readonly to a hub that renders a
-	// lease itself. It is additive (contract v1 minor): a hub can only add
-	// read-only from it, never drop it.
-	ReadOnly bool      `json:"readonly,omitempty"`
+	// Writable carries the session's --writable to a hub that renders a
+	// lease itself (specs/write-policy.md §3). It is additive (contract v1
+	// minor). "" or an unrecognized value means read-only.
+	Writable string    `json:"writable,omitempty"`
 	Started  time.Time `json:"started"`
 }
 

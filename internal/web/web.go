@@ -22,6 +22,7 @@ import (
 
 	"github.com/mcint/glow-web/internal/gitstatus"
 	"github.com/mcint/glow-web/internal/listen"
+	"github.com/mcint/glow-web/internal/policy"
 	"github.com/mcint/glow-web/internal/render"
 	"github.com/mcint/glow-web/internal/version"
 	"github.com/mcint/glow-web/internal/walk"
@@ -46,7 +47,7 @@ type Server struct {
 	Root           string       // absolute path: a file (ModeFile) or dir (ModeDir)
 	Walk           walk.Options // populated when Mode == ModeDir
 	URLPrefix      string       // mount point, e.g. "/docs"; empty means no prefix
-	ReadOnly       bool         // disables edit + save (also hides Edit link)
+	Writable       policy.Write // what browsers may save (specs/write-policy.md); the zero value is read-only
 	DefaultMarkup  bool         // when true, default view is hybrid markup; ?view=rendered overrides
 	CommandPalette bool         // when true, ⌘K / Ctrl-K opens a fuzzy file palette on every page
 	Theme          string       // "auto" (default), "light", or "dark"; user toggle in UI overrides
@@ -400,8 +401,8 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 		return
 	}
 	if q.Get("edit") == "1" && class == "md" {
-		if s.ReadOnly {
-			http.Error(w, "edit disabled (--readonly)", http.StatusForbidden)
+		if !s.Writable.Allows(class) {
+			http.Error(w, "edit disabled: read-only (start with --writable=md to allow saving)", http.StatusForbidden)
 			return
 		}
 		s.serveEdit(w, raw, displayName, rel)
@@ -459,7 +460,7 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 			data.ToggleURL = selfURL + "?view=markup"
 			data.ToggleLabel = "Markup"
 		}
-		if !s.ReadOnly {
+		if s.Writable.Allows(class) {
 			data.EditURL = selfURL + "?edit=1"
 		}
 	}
@@ -956,17 +957,20 @@ func (s *Server) handleRender(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSave writes the request body to the file's location on disk, gated
-// by ReadOnly and the same path-resolution rules as serveOne.
+// by the Writable policy and the same path-resolution rules as serveOne.
 func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
-	if s.ReadOnly {
-		http.Error(w, "save disabled (--readonly)", http.StatusForbidden)
-		return
+	readOnly := func() {
+		http.Error(w, "save disabled: read-only (start with --writable=md to allow saving)", http.StatusForbidden)
 	}
 	var abs string
 	switch s.Mode {
 	case ModeFile:
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
+			return
+		}
+		if !s.Writable.Allows("md") { // file mode serves its file as md
+			readOnly()
 			return
 		}
 		abs = s.Root
@@ -980,6 +984,10 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 		match := findFile(files, rel)
 		if match == nil || match.Class != "md" {
 			http.NotFound(w, r)
+			return
+		}
+		if !s.Writable.Allows(match.Class) {
+			readOnly()
 			return
 		}
 		abs = match.Abs

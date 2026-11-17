@@ -148,3 +148,48 @@ func TestPins_DanglingIsNotLive_InvalidNamesSkipped(t *testing.T) {
 		t.Fatalf("pins = %+v", pins)
 	}
 }
+
+// specs/write-policy.md §3: a pin's policy lives in <state>/writable/<name>.
+func TestPinWritable(t *testing.T) {
+	st := newState(t)
+	name, err := st.Publish(t.TempDir(), "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := func() registry.Pin {
+		pins, _ := st.Pins()
+		return pins[0]
+	}
+	if w := pin().Writable; w != "" {
+		t.Errorf("default pin writable = %q, want empty (read-only)", w)
+	}
+	if err := st.SetPinWritable(name, "md"); err != nil {
+		t.Fatal(err)
+	}
+	if w := pin().Writable; w != "md" {
+		t.Errorf("after md: %q", w)
+	}
+	f := filepath.Join(st.Dir, "writable", name)
+	if b, _ := os.ReadFile(f); strings.TrimSpace(string(b)) != "md" {
+		t.Errorf("writable file = %q", b)
+	}
+	if err := st.SetPinWritable(name, "no"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(f); !os.IsNotExist(err) {
+		t.Error("--writable=no should remove the file")
+	}
+	if err := st.SetPinWritable(name, "glob:**"); err == nil {
+		t.Error("invalid policy accepted")
+	}
+	if err := st.SetPinWritable("absent", "md"); err == nil {
+		t.Error("policy for an unpublished name accepted")
+	}
+	st.SetPinWritable(name, "yes")
+	if err := st.Unpublish(name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(f); !os.IsNotExist(err) {
+		t.Error("unpublish left the writable file")
+	}
+}
