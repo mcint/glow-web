@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mcint/glow-web/internal/policy"
 	"github.com/mcint/glow-web/internal/walk"
 	"github.com/mcint/glow-web/internal/web"
 )
@@ -318,6 +319,7 @@ func TestTheme_InvalidValueFallsBackToAuto(t *testing.T) {
 
 func TestTheme_TogglePresentOnAllPages(t *testing.T) {
 	_, s := dirFixture(t)
+	s.Writable = policy.MD // saving/editing is opt-in (specs/write-policy.md)
 	for _, path := range []string{"/", "/alpha.md", "/alpha.md?edit=1"} {
 		rec := serve(s.Handler(), "GET", path, "")
 		if !strings.Contains(rec.Body.String(), `id="theme-toggle"`) {
@@ -884,6 +886,7 @@ func TestMarkupView_DefaultMarkupServer(t *testing.T) {
 
 func TestEdit_PageRenders(t *testing.T) {
 	dir, s := dirFixture(t)
+	s.Writable = policy.MD // saving/editing is opt-in (specs/write-policy.md)
 	_ = dir
 	rec := serve(s.Handler(), "GET", "/alpha.md?edit=1", "")
 	if rec.Code != 200 {
@@ -906,7 +909,7 @@ func TestEdit_PageRenders(t *testing.T) {
 
 func TestEdit_DisabledWhenReadOnly(t *testing.T) {
 	_, s := dirFixture(t)
-	s.ReadOnly = true
+	// read-only is the zero value now (specs/write-policy.md)
 	rec := serve(s.Handler(), "GET", "/alpha.md?edit=1", "")
 	if rec.Code != 403 {
 		t.Errorf("readonly edit should 403, got %d", rec.Code)
@@ -932,6 +935,7 @@ func TestRenderEndpoint_ConvertsBody(t *testing.T) {
 
 func TestSave_WritesFile(t *testing.T) {
 	dir, s := dirFixture(t)
+	s.Writable = policy.MD // saving/editing is opt-in (specs/write-policy.md)
 	rec := serve(s.Handler(), "POST", "/alpha.md", "# Updated\n")
 	if rec.Code != 204 {
 		t.Fatalf("save status = %d, want 204", rec.Code)
@@ -947,7 +951,7 @@ func TestSave_WritesFile(t *testing.T) {
 
 func TestSave_DisabledWhenReadOnly(t *testing.T) {
 	dir, s := dirFixture(t)
-	s.ReadOnly = true
+	// read-only is the zero value now (specs/write-policy.md)
 	rec := serve(s.Handler(), "POST", "/alpha.md", "# Hijack\n")
 	if rec.Code != 403 {
 		t.Errorf("readonly save should 403, got %d", rec.Code)
@@ -960,6 +964,7 @@ func TestSave_DisabledWhenReadOnly(t *testing.T) {
 
 func TestSave_GitignoredReturns404(t *testing.T) {
 	dir, s := dirFixture(t)
+	s.Writable = policy.MD // saving/editing is opt-in (specs/write-policy.md)
 	rec := serve(s.Handler(), "POST", "/secret.md", "# Pwn\n")
 	if rec.Code != 404 {
 		t.Errorf("gitignored save should 404, got %d", rec.Code)

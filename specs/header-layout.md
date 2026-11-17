@@ -17,7 +17,7 @@ each control sits next to what it governs.*
   <div class="browser">                   ← the permanent (file-)browser wrapper, flex:1
     <div class="browser-loc">             ← location (present in every view)
       <div class="parent-hint">           context path, stacked atop…
-      <nav class="crumbs">                 …project name + breadcrumbs
+      <nav class="crumbs">                 …[hub /] project name + breadcrumbs
     <div class="browser-controls">        ← dir-view ONLY: filter, count, class/hidden chips
   <nav class="bar-actions">               ← document actions + global theme, far right
 ```
@@ -36,6 +36,12 @@ each control sits next to what it governs.*
   one row, controls on the next. So deep breadcrumbs no longer wrap against the
   filter row — the thing that motivated this layout. The controls dropping to
   their own row is the scope boundary made visible.
+- **Hub crumb → first in the crumbs.** Under a glow-web hub
+  (`specs/unified-listener.md`), the location begins `hub / <project> / …`.
+  The hub is the outermost scope (every project on the host), so it sits just
+  before the project's base-path crumb, inside the same location nav. It is a
+  link in the link colour at a lighter weight, and it is absent when running
+  standalone. Test: `TestHubCrumb_PresentUnderHubOnEveryView`.
 - **`.bar-actions` → far right.** Raw/Download/Edit (or View/Save) act on the
   *current document*, a different scope from browsing; the global theme toggle
   is app-wide. Both are "act on what's shown," distinct from "where am I /

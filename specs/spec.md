@@ -49,10 +49,13 @@ The AST flows: `bytes → mdcore.Parse → ast.Node → {render,slice} → outpu
 glow-web web PATH [flags]                        serve file OR directory
     --addr 127.0.0.1:8080                        loopback by default; ":8080" or
                                                  "0.0.0.0:8080" exposes on LAN
+    --listen unix:/path/g.sock                   overrides --addr; also tcp:HOST:PORT
     --url-prefix /docs                           mount under prefix (reverse-proxy)
     --gitignore=true                             honor .gitignore (dir mode)
     --ignore-files .rgignore,.glowignore         additional ignore-files
-    --readonly                                   disable edit + save
+    --writable no|md|yes                         what browsers may save; default no
+                                                 (read-only). specs/write-policy.md
+    --readonly                                   same as --writable=no
     --markup                                     default to hybrid markup view
     --title-prefix glow-web                      <title> as "<prefix>: <doc>"; "" disables
     --log-level off|dot|info                     access log: silent | "." per req | full line

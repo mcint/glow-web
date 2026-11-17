@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/mcint/glow-web/internal/gitstatus"
+	"github.com/mcint/glow-web/internal/listen"
+	"github.com/mcint/glow-web/internal/policy"
 	"github.com/mcint/glow-web/internal/render"
 	"github.com/mcint/glow-web/internal/version"
 	"github.com/mcint/glow-web/internal/walk"
@@ -45,7 +47,7 @@ type Server struct {
 	Root           string       // absolute path: a file (ModeFile) or dir (ModeDir)
 	Walk           walk.Options // populated when Mode == ModeDir
 	URLPrefix      string       // mount point, e.g. "/docs"; empty means no prefix
-	ReadOnly       bool         // disables edit + save (also hides Edit link)
+	Writable       policy.Write // what browsers may save (specs/write-policy.md); the zero value is read-only
 	DefaultMarkup  bool         // when true, default view is hybrid markup; ?view=rendered overrides
 	CommandPalette bool         // when true, ⌘K / Ctrl-K opens a fuzzy file palette on every page
 	Theme          string       // "auto" (default), "light", or "dark"; user toggle in UI overrides
@@ -54,6 +56,13 @@ type Server struct {
 	Addr           string       // bound address (e.g. "127.0.0.1:8080"); set by CLI and updated after net.Listen
 	LogLevel       LogLevel     // per-request access logging; LogOff (default) skips the middleware entirely
 	LogOut         io.Writer    // log destination; nil means os.Stderr
+	// HubURL is the hub's root when this server is mounted under a glow-web
+	// hub (e.g. "/" or "/docs/"); the location then starts with a "hub"
+	// crumb. Empty when standalone.
+	HubURL string
+	// TCPGate, when set, wraps the handler on TCP listeners only (auth).
+	// A unix socket is gated by its file mode instead.
+	TCPGate func(http.Handler) http.Handler
 }
 
 // NewServer constructs a Server, autodetecting Mode from path's stat. walkOpts
@@ -86,7 +95,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/_/render", s.handleRender)
 	mux.HandleFunc("/_/files", s.handleFiles)
 	mux.HandleFunc("/", s.handleRoot)
-	var h http.Handler = mux
+	// One gate for every state-changing request (save, /_/render): refuse
+	// cross-origin browser requests (Sec-Fetch-Site / Origin), so a page on
+	// another site can't POST into a loopback server. Safe methods and
+	// header-less clients (curl) pass unchanged.
+	var h http.Handler = http.NewCrossOriginProtection().Handler(mux)
 	if s.URLPrefix != "" {
 		h = http.StripPrefix(s.URLPrefix, h)
 	}
@@ -99,17 +112,40 @@ func (s *Server) Handler() http.Handler {
 // and a bind failure surfaces before the misleading "serving …" notice.
 // The Server's Addr field is updated to the bound address so any
 // "auto"-style title prefix can interpolate the real port.
+//
+// addr is a listen spec (internal/listen): "HOST:PORT", "tcp:HOST:PORT"
+// or "unix:PATH".
 func (s *Server) Serve(addr string) error {
-	ln, err := net.Listen("tcp", addr)
+	ln, err := listen.Listen(addr)
 	if err != nil {
 		return err
 	}
-	s.Addr = ln.Addr().String()
+	return s.ServeListener(ln)
+}
+
+// ServeListener serves on an already-bound listener (TCP or unix) and
+// blocks. It prints the reachable URLs first.
+func (s *Server) ServeListener(ln net.Listener) error {
 	fmt.Fprintf(os.Stderr, "glow-web %s — serving %s\n", version.String(), s.Root)
-	for _, line := range s.listenerLines(s.Addr) {
-		fmt.Fprintln(os.Stderr, line)
+	if ln.Addr().Network() == "unix" {
+		// No port to put in the title; boundPort() yields "" for Addr="".
+		s.Addr = ""
+		fmt.Fprintln(os.Stderr, unixListenerLine(ln.Addr().String(), s.URLPrefix))
+	} else {
+		s.Addr = ln.Addr().String()
+		for _, line := range s.listenerLines(s.Addr) {
+			fmt.Fprintln(os.Stderr, line)
+		}
+		if s.TCPGate != nil {
+			return http.Serve(ln, s.TCPGate(s.Handler()))
+		}
 	}
 	return http.Serve(ln, s.Handler())
+}
+
+// unixListenerLine prints the socket and a copy-pasteable curl for it.
+func unixListenerLine(path, urlPrefix string) string {
+	return fmt.Sprintf("    unix:%s  (curl --unix-socket %s http://localhost%s/)", path, path, urlPrefix)
 }
 
 // listenerLines formats one line per reachable URL for the bound address.
@@ -365,8 +401,8 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 		return
 	}
 	if q.Get("edit") == "1" && class == "md" {
-		if s.ReadOnly {
-			http.Error(w, "edit disabled (--readonly)", http.StatusForbidden)
+		if !s.Writable.Allows(class) {
+			http.Error(w, "edit disabled: read-only (start with --writable=md to allow saving)", http.StatusForbidden)
 			return
 		}
 		s.serveEdit(w, raw, displayName, rel)
@@ -407,6 +443,7 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 		Name:        displayName,
 		Path:        displayPath(displayName, rel),
 		ParentHint:  s.parentHint(),
+		HubURL:      s.HubURL,
 		Crumbs:      s.crumbsForFile(rel, displayName),
 		Body:        template.HTML(body),
 		ViewURL:     selfURL,
@@ -423,7 +460,7 @@ func (s *Server) serveOne(w http.ResponseWriter, r *http.Request, abs, displayNa
 			data.ToggleURL = selfURL + "?view=markup"
 			data.ToggleLabel = "Markup"
 		}
-		if !s.ReadOnly {
+		if s.Writable.Allows(class) {
 			data.EditURL = selfURL + "?edit=1"
 		}
 	}
@@ -501,6 +538,7 @@ func (s *Server) serveEdit(w http.ResponseWriter, src []byte, displayName, rel s
 		Name:        displayName,
 		Path:        displayPath(displayName, rel),
 		ParentHint:  s.parentHint(),
+		HubURL:      s.HubURL,
 		Crumbs:      s.crumbsForFile(rel, displayName),
 		Source:      string(src),
 		ViewURL:     selfURL,
@@ -794,6 +832,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		Title:       filepath.Base(s.Root),
 		Path:        displayRoot(s.Root),
 		ParentHint:  s.parentHint(),
+		HubURL:      s.HubURL,
 		Crumbs:      s.crumbsForIndex(prefixFilter),
 		Filter:      prefixFilter,
 		Files:       items,
@@ -918,17 +957,20 @@ func (s *Server) handleRender(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSave writes the request body to the file's location on disk, gated
-// by ReadOnly and the same path-resolution rules as serveOne.
+// by the Writable policy and the same path-resolution rules as serveOne.
 func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
-	if s.ReadOnly {
-		http.Error(w, "save disabled (--readonly)", http.StatusForbidden)
-		return
+	readOnly := func() {
+		http.Error(w, "save disabled: read-only (start with --writable=md to allow saving)", http.StatusForbidden)
 	}
 	var abs string
 	switch s.Mode {
 	case ModeFile:
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
+			return
+		}
+		if !s.Writable.Allows("md") { // file mode serves its file as md
+			readOnly()
 			return
 		}
 		abs = s.Root
@@ -942,6 +984,10 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 		match := findFile(files, rel)
 		if match == nil || match.Class != "md" {
 			http.NotFound(w, r)
+			return
+		}
+		if !s.Writable.Allows(match.Class) {
+			readOnly()
 			return
 		}
 		abs = match.Abs
@@ -983,6 +1029,7 @@ type pageData struct {
 	Name        string
 	Path        string
 	ParentHint  string // path above the serving root, e.g. "~/dev-llm"; empty at "/"
+	HubURL      string // hub root when mounted under a hub; "" standalone
 	Crumbs      []crumb
 	Body        template.HTML
 	Source      string // edit page only
@@ -1027,6 +1074,7 @@ type indexData struct {
 	Title       string
 	Path        string  // home-relative project root, shown in footer
 	ParentHint  string  // path above the serving root, e.g. "~/dev-llm"; empty at "/"
+	HubURL      string  // hub root when mounted under a hub; "" standalone
 	Crumbs      []crumb // breadcrumb nav for current prefix filter
 	Filter      string  // current prefix filter (e.g. "sub/"); empty means root
 	Files       []indexItem

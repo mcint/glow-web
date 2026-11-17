@@ -9,9 +9,91 @@ While we're pre-1.0, minors are allowed to break things; patches will not.
 
 ## [Unreleased]
 
+**Breaking:** glow-web is now read-only by default. Pass `--writable=md`
+(or `yes`) to get the Edit page and saving back. `--readonly` still works
+and means `--writable=no`. lmux-spawned servers become read-only too until
+lmux passes a value. See `specs/write-policy.md`.
+
 Freshness P1 (manual refresh + fresh/stale indicator) is spec'd in
 `specs/fresh-stale.md` but not yet implemented. A hover-expand variant of the
 segmented filter chips is queued (see `sessions/2026-05-28-requests.md`).
+
+### Added
+
+- `web --listen unix:PATH` (or `tcp:HOST:PORT`) serves on a unix-domain
+  socket, created mode 0600. A dead socket file left by a killed process is
+  replaced; a live one is refused; a non-socket file is never removed.
+  This is rung A of `specs/unified-listener.md`, and it lets lmux/Caddy
+  proxy by socket path.
+- `glow-web name [PATH]` prints the mount name for a root: lmux's
+  `kebab(basename)`, made URL-safe (`specs/unified-listener.md` §3, rung 2).
+- `glow-web hub` serves every published dir at `/<name>/` on one port
+  (default `127.0.0.1:7171`) and on `<state>/run/hub.sock`. It has an index
+  at `/` and JSON status at `/_/hub`, and checks the Host header on TCP (a
+  DNS-rebinding guard; `--allow-host` adds names). `publish PATH [--name]`,
+  `unpublish NAME` and `ls` manage pins: symlinks in
+  `~/.local/state/glow-web/mounts/` (`$GLOW_WEB_STATE_DIR` or
+  `$XDG_STATE_HOME` override it). Changes apply without a hub restart.
+  `glow-web web a/ b/` with several paths runs an ephemeral hub over just
+  those. Rung 3 (B1).
+- `glow-web web PATH --hub=lease [--name NAME]` binds nothing. The running
+  hub serves PATH at `/<name>/` exactly while this process lives (a flocked
+  `run/<name>.json`, so even `kill -9` releases it). `glow-web ls` lists
+  leases with their pid. The hub's `/_/hub` now reports its `url`.
+  Rung 4 (B2).
+- `glow-web web PATH --hub=proxy [--name NAME]` serves PATH on its own
+  `run/<name>.sock` with its own binary and flags. The hub forwards
+  `/<name>/…` to it unchanged (path, query, Host, headers, body). If the
+  session dies, the URL is a 404; if its socket hangs, a 502 names the root.
+  `--listen unix:` now explains an over-long socket path instead of
+  failing with "invalid argument". Rung 5 (C).
+- `--hub=auto` leases when the hub runs this exact build and otherwise
+  proxies. Mixed versions (a `glow-web-dev` session beside stable ones)
+  just work. The hub index shows each session's version and flags skew.
+  Sessions from a newer run-record contract are listed as `incompatible`
+  and explained rather than routed. Rung 6 (V).
+- No daemon needed: any `--hub=lease|proxy|auto` session becomes the hub
+  when none is running (an election by flock on `run/hub.lock`), and another
+  takes over within ~2s when it exits, on the same port and URLs. `glow-web
+  hub` joins the same election, so it can't collide with an elected session.
+  `--hub-elect=false` opts out; `--hub-addr` / `GLOW_WEB_HUB_ADDR` sets the
+  port. Rung 7 (D).
+- Pages served under a hub start their location with a **hub** crumb
+  (`hub / <project> / …`) that links to the hub index. README has a "Hub"
+  section covering pin/lease/proxy/auto, election and the state layout.
+- HTTP Basic auth (bcrypt htpasswd) on TCP listeners. When
+  `~/.local/state/glow-web/htpasswd` exists, every hub enforces it,
+  including session-elected ones; standalone `web` takes
+  `--auth-htpasswd FILE`. `glow-web passwd USER` prints a line. The file
+  is re-read on change and fails closed on a loose mode, a non-bcrypt hash
+  or an empty file. Unix sockets stay ungated (mode 0600). A non-loopback
+  bind warns about cleartext. Rung 9.
+- Write policy: `--writable=no|md|yes` (alias `--writeable`), default
+  `no`. It belongs to each mount's owner: standalone and arg roots take
+  their process flag, pins take `publish --writable` (stored in
+  `<state>/writable/<name>`), leases carry it in their run record, and
+  proxies serve themselves. A hub never applies its own flag to pins or
+  leases, so an elected session can't widen anyone's mount. Unrecognized
+  stored values fail closed. `ls` and the hub index show a write column.
+  (This supersedes the interim `readonly` record field, which fixed
+  `web --hub=lease --readonly` being writable through the hub.)
+- Lease run records are contract 2: a hub from before write policy refuses
+  them (listed as incompatible) instead of serving them writable. Proxy
+  records stay contract 1 and still work under old hubs.
+
+### Build
+
+- `go` floor 1.25 → 1.26: `golang.org/x/crypto` v0.58.0 (bcrypt) requires
+  it. New deps: `golang.org/x/crypto`, `golang.org/x/term` (no-echo
+  password prompt).
+
+### Security
+
+- Saving (and `/_/render`) now refuses cross-origin browser requests
+  (`Sec-Fetch-Site` / `Origin`, via Go's `http.CrossOriginProtection`).
+  Before this, any web page could POST to a loopback glow-web and overwrite
+  a served file. The hub would have widened that to every published
+  project. Same-origin edits and curl are unaffected.
 
 ### Changed
 

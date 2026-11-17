@@ -72,6 +72,12 @@ glow-web web . --addr 0.0.0.0:8080     # explicit form
 # Reverse-proxy mount
 glow-web web . --addr :8080 --url-prefix /docs
 
+# Many projects on one port, each at /<name>/ (see "Hub" below)
+glow-web web . --hub=auto                # http://127.0.0.1:7171/<this-dir>/
+
+# Unix socket (for Caddy/lmux `reverse_proxy unix//…`, or curl --unix-socket)
+glow-web web . --listen unix:/tmp/glow.sock --url-prefix /docs
+
 # Render to HTML on stdout
 glow-web render README.md --format html
 
@@ -85,19 +91,112 @@ glow-web slice specs/spec.md --heading "Architecture"
 glow-web version
 ```
 
+## Hub: many projects, one port
+
+One listener per host, every project at `/<name>/`, plus an index at `/`.
+The name is the directory's basename in kebab-case (`ClaudeCollab` →
+`claude-collab`, the same rule lmux uses); `glow-web name [PATH]` prints it,
+and `--name` overrides it. Every page under a hub starts its location with a
+**hub** crumb that links back to the index.
+
+There are three ways to put a directory on the hub. They differ only in how
+long it stays there:
+
+| how | command | served by | lives until |
+|---|---|---|---|
+| **pin** | `glow-web publish PATH [--name N]` | the hub, in-process | `glow-web unpublish N` |
+| **lease** | `glow-web web PATH --hub=lease` | the hub, in-process | this process exits (even `kill -9`) |
+| **proxy** | `glow-web web PATH --hub=proxy` | this process, on its own socket; the hub forwards to it | this process exits |
+
+`--hub=auto` picks for you: lease when the hub runs this exact build, else
+proxy. Proxy is the right choice for a `glow-web-dev` session beside a
+stable hub, or any time versions differ. The hub's index shows each mount's
+version and marks any that differ from the hub's.
+
+**No daemon is needed.** Any `--hub=…` session becomes the hub when none
+is running. If that session exits, another takes over within ~2s, on the same
+port and URLs. That works because everything the hub knows lives on disk.
+For an always-on site, run `glow-web hub` itself (e.g. under launchd): it
+joins the same election, so it never collides with a session.
+
+```sh
+glow-web publish ~/notes                 # pin (read-only): prints "notes"
+glow-web hub                             # http://127.0.0.1:7171/ (index) and /notes/
+cd ~/dev-llm/glow-web && glow-web web . --hub=auto
+glow-web ls                              # pins, leases, proxies, and the hub's pid
+glow-web unpublish notes                 # removes the link, never the dir
+glow-web web ~/a ~/b                     # ad hoc, no registry: /a/ and /b/ on one port
+curl --unix-socket ~/.local/state/glow-web/run/hub.sock http://localhost/_/hub   # JSON status
+```
+
+State lives in one dir, `~/.local/state/glow-web/` (`$GLOW_WEB_STATE_DIR` or
+`$XDG_STATE_HOME` override it), at 0700. glow-web refuses to use it if it is
+group- or world-writable.
+
+```
+mounts/<name> -> /abs/dir     pins (plain symlinks: `ln -s` works too)
+run/<name>.json               one per open session (flock = alive)
+run/<name>.sock               proxy sessions' sockets
+run/hub.sock, run/hub.lock    the hub's socket and its election lock
+writable/<name>               a pin's write policy (absent = read-only)
+```
+
+**Read-only by default.** Every mount is read-only unless its owner opts in
+with `--writable=md` (or `yes`), and a hub never widens anyone's mount:
+
+```sh
+glow-web publish ~/notes --writable=md    # pin's policy → <state>/writable/notes
+glow-web web . --hub=auto --writable=md   # a session's policy travels with its lease
+ls ~/.local/state/glow-web/writable/      # exactly the pins that accept writes
+```
+
+**Password protection (HTTP Basic, bcrypt).** Create
+`~/.local/state/glow-web/htpasswd` and every hub enforces it on its TCP
+port, whichever process holds the hub role. Remove the file to turn auth
+off; edits apply without a restart.
+
+```sh
+glow-web passwd ann >> ~/.local/state/glow-web/htpasswd   # prompts, no echo
+chmod 600 ~/.local/state/glow-web/htpasswd                 # loose modes are refused
+glow-web web . --auth-htpasswd FILE                        # standalone (non-hub) only
+```
+
+Only bcrypt lines are accepted (`glow-web passwd` or `htpasswd -nB`).
+Unix sockets stay ungated: their 0600 mode already limits them to you.
+Basic auth is cleartext on a LAN bind (glow-web warns about it), so put
+TLS in front.
+
+**Behind lmux.** Add `{"docs": {"sock": "~/.local/state/glow-web/run/hub.sock"}}`
+(as an absolute path) to `~/.local/state/lmux/promoted-services.json`, and
+every project is at `https://docs.lmux.test:8443/<name>/`, on the same paths
+as `127.0.0.1:7171`.
+
+Hub-related flags: `glow-web hub --addr 127.0.0.1:7171 --url-prefix /docs
+--allow-host docs.example`. Sessions take `--hub-addr` (or
+`GLOW_WEB_HUB_ADDR`), and `--hub-elect=false` stops a session from becoming
+the hub. The TCP listener only answers to loopback Host names
+(`localhost`, `*.localhost`, `127.0.0.1`, `[::1]`) plus `--allow-host`. The
+unix socket is gated by its 0600 mode, which is how a front such as lmux
+reaches the hub. Design and rationale: [`specs/unified-listener.md`](specs/unified-listener.md).
+
 ## Web flags
 
 ```
 --addr 127.0.0.1:8080      loopback only by default; ":8080" or "0.0.0.0:8080" for LAN
+--listen unix:PATH         listen on a unix socket (0600) instead; also tcp:HOST:PORT
 --url-prefix /docs         mount under URL prefix for reverse-proxy use
 --gitignore=true           honor .gitignore (dir mode)
 --ignore-files .rgignore   comma-separated additional ignore-files
---readonly                 disable the edit page and save endpoint
+--writable no|md|yes       what the browser may save (default no: read-only; md = markdown);
+                           alias --writeable. --readonly = --writable=no
 --markup                   default to hybrid markup view
 --palette=true             ⌘K / Ctrl-K command palette (default on)
 --theme auto               auto | light | dark (browser toggle overrides)
 --title-prefix glow-web    prepended to <title> as "<prefix>: <doc>"; "" disables.
                            Add port to distinguish instances: --title-prefix "glow-web:8080"
+--hub off                  off | lease | proxy | auto: join the host's hub (see "Hub")
+--name NAME                mount name under the hub (default: derived from PATH)
+--auth-htpasswd FILE       HTTP Basic (bcrypt htpasswd) on a TCP listener
 ```
 
 ## Status

@@ -7,12 +7,15 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/mcint/glow-web/internal/auth"
+	"github.com/mcint/glow-web/internal/hub"
+	"github.com/mcint/glow-web/internal/registry"
 	"github.com/mcint/glow-web/internal/render"
 	"github.com/mcint/glow-web/internal/slice"
 	"github.com/mcint/glow-web/internal/version"
-	"github.com/mcint/glow-web/internal/walk"
 	"github.com/mcint/glow-web/internal/web"
 )
 
@@ -22,9 +25,18 @@ usage: glow-web <command> [options] [path]
        glow-web --version
 
 commands:
-  web      serve a markdown file or directory as HTML
+  web      serve a markdown file or directory as HTML (several PATHs: one
+           port, each at /<name>/)
+  hub      serve every published dir at /<name>/ on one port (default
+           127.0.0.1:7171) and on <state>/run/hub.sock
+  publish  pin PATH to the hub at /<name>/ until unpublished
+  unpublish NAME   remove a pin (never touches the dir itself)
+  ls       list published mounts and whether the hub runs
+  passwd USER      print an htpasswd (bcrypt) line; append it to
+           <state>/htpasswd to turn on hub auth
   slice    extract a section by heading path
   render   render a markdown file to stdout (html | markup)
+  name     print the mount name derived from PATH (default .)
   tui      open the markdown file in a terminal UI (stub in v0)
   version  print the build version
   help     print this message
@@ -41,6 +53,18 @@ func main() {
 	switch cmd {
 	case "web":
 		runWeb(args)
+	case "hub":
+		runHub(args)
+	case "publish":
+		runPublish(args)
+	case "unpublish":
+		runUnpublish(args)
+	case "ls":
+		runLs(args)
+	case "passwd":
+		runPasswd(args)
+	case "name":
+		runName(args)
 	case "slice":
 		runSlice(args)
 	case "render":
@@ -61,53 +85,115 @@ func main() {
 func runWeb(args []string) {
 	fs := flag.NewFlagSet("web", flag.ExitOnError)
 	addr := fs.String("addr", "127.0.0.1:8080", `address to listen on (default loopback only; use ":8080" or "0.0.0.0:8080" to expose on LAN)`)
+	listenSpec := fs.String("listen", "", `listen spec, overrides --addr: "tcp:HOST:PORT" or "unix:PATH" (socket mode 0600; a dead socket file is replaced, a live one is refused)`)
 	prefix := fs.String("url-prefix", "", `mount under URL prefix, e.g. "/docs"`)
-	gitignore := fs.Bool("gitignore", true, "honor .gitignore (dir mode); use --gitignore=false to disable")
-	ignoreFiles := fs.String("ignore-files", "", "comma-separated additional ignore-files (relative to PATH or absolute)")
-	readonly := fs.Bool("readonly", false, "disable the edit page and save endpoint")
-	markupDefault := fs.Bool("markup", false, "default to hybrid markup view (toggle with ?view=rendered)")
-	palette := fs.Bool("palette", true, "enable ⌘K / Ctrl-K command palette (use --palette=false to disable)")
-	theme := fs.String("theme", "auto", "default theme: auto | light | dark (browser toggle overrides)")
-	titlePrefix := fs.String("title-prefix", "auto", `<title> rendered as "<doc> · <prefix>". "auto" expands to "glow-web[:port]"; "" disables; any other value passes through verbatim.`)
-	titlePrefixPort := fs.String("title-prefix-port", "auto", `port handling when --title-prefix=auto: "auto" (include if known), "never" (omit, useful behind a reverse proxy), "always".`)
-	logLevel := fs.String("log-level", "dot", `per-request access log: "dot" (default) marks "|" per primary page view and "." per internal request, e.g. "|.....|..|....."; "off" silent; "info" one line per request (client method path status bytes duration).`)
+	hubMode := fs.String("hub", "off", `join the host's glow-web hub instead of binding a port: "off" (default) | "lease" (the hub serves PATH at /<name>/ while this process runs) | "proxy" (this process serves PATH on its own socket; the hub forwards /<name>/ to it) | "auto" (lease when the hub runs this exact build, else proxy)`)
+	name := fs.String("name", "", "mount name under the hub (default: derived from PATH; see `glow-web name`)")
+	hubAddr := fs.String("hub-addr", envOr("GLOW_WEB_HUB_ADDR", DefaultHubAddr), "where an elected hub listens (env GLOW_WEB_HUB_ADDR)")
+	elect := fs.Bool("hub-elect", true, "with --hub: become the hub when none is running, and take over when it exits")
+	authFile := fs.String("auth-htpasswd", "", "htpasswd file (bcrypt) for HTTP Basic on a TCP listener; standalone and `web a/ b/` only (a hub uses <state>/htpasswd)")
+	sf := addServerFlags(fs)
 	parseIntermixed(fs, args)
 	if fs.NArg() < 1 {
 		fmt.Fprintln(os.Stderr, "glow-web web: missing PATH (file or directory)")
 		os.Exit(2)
 	}
-
-	walkOpts := walk.Options{
-		Gitignore: *gitignore,
+	if err := checkAuthFlag(*hubMode, *authFile); err != nil {
+		die(err)
 	}
-	if *ignoreFiles != "" {
-		for _, p := range strings.Split(*ignoreFiles, ",") {
-			if p = strings.TrimSpace(p); p != "" {
-				walkOpts.IgnoreFiles = append(walkOpts.IgnoreFiles, p)
+	var el *hub.Elector
+	if *hubMode != "off" {
+		el = sessionElector(registry.DefaultState(), *hubAddr, sf, *elect)
+	}
+	if *hubMode == "auto" {
+		st := registry.DefaultState()
+		hs, up := hubStatus(st)
+		if !up && el != nil {
+			// No hub: try to be it. Then the hub is this exact build.
+			if won, _ := el.TryOnce(); won {
+				hs, up = hub.Status{Version: version.String()}, true
 			}
 		}
+		*hubMode = autoMode(up, hs.Version, version.String())
+		fmt.Fprintf(os.Stderr, "glow-web: --hub=auto → %s\n", *hubMode)
+	}
+	switch *hubMode {
+	case "off":
+	case "lease":
+		if fs.NArg() > 1 {
+			die(fmt.Errorf("--hub=lease takes one PATH"))
+		}
+		wp, err := sf.writePolicy()
+		if err != nil {
+			die(err)
+		}
+		runLease(fs.Arg(0), *name, wp, el)
+		return
+	case "proxy":
+		if fs.NArg() > 1 {
+			die(fmt.Errorf("--hub=proxy takes one PATH"))
+		}
+		runProxy(fs.Arg(0), *name, sf, el)
+		return
+	default:
+		die(fmt.Errorf("--hub=%q: want off, lease, proxy or auto", *hubMode))
+	}
+	spec := *addr
+	if *listenSpec != "" {
+		spec = *listenSpec
 	}
 
-	s, err := web.NewServer(fs.Arg(0), walkOpts)
+	// Several roots: an ephemeral hub over just these, each at /<name>/.
+	// It reads no registry and binds no hub.sock.
+	if fs.NArg() > 1 {
+		wp, err := sf.writePolicy()
+		if err != nil {
+			die(err)
+		}
+		extra, err := argMounts(fs.Args(), wp)
+		if err != nil {
+			die(err)
+		}
+		h, err := newHub(nil, extra, *prefix, sf)
+		if err != nil {
+			die(err)
+		}
+		die(serveEphemeral(h, spec, standaloneGate(*authFile)))
+	}
+
+	s, err := web.NewServer(fs.Arg(0), sf.walk())
 	if err != nil {
 		die(err)
 	}
-	lvl, err := web.ParseLogLevel(*logLevel)
+	cfg, err := sf.apply(false)
 	if err != nil {
 		die(err)
 	}
+	cfg(s)
 	s.URLPrefix = normalizePrefix(*prefix)
-	s.ReadOnly = *readonly
-	s.DefaultMarkup = *markupDefault
-	s.CommandPalette = *palette
-	s.Theme = *theme
-	s.TitlePrefix = *titlePrefix
-	s.TitlePort = *titlePrefixPort
-	s.Addr = *addr
-	s.LogLevel = lvl
-	if err := s.Serve(*addr); err != nil {
+	if g := standaloneGate(*authFile); g != nil {
+		s.TCPGate = g.Wrap
+		authNotice(g, spec)
+	}
+	if err := s.Serve(spec); err != nil {
 		die(err)
 	}
+}
+
+// runName prints the name a root mounts under: lmux's kebab(basename),
+// made URL-safe (specs/unified-listener.md §3).
+func runName(args []string) {
+	fs := flag.NewFlagSet("name", flag.ExitOnError)
+	parseIntermixed(fs, args)
+	root := "."
+	if fs.NArg() > 0 {
+		root = fs.Arg(0)
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		die(err)
+	}
+	fmt.Println(registry.NameFor(abs))
 }
 
 func runSlice(args []string) {
@@ -222,6 +308,25 @@ func parseIntermixed(fs *flag.FlagSet, args []string) {
 		}
 	}
 	_ = fs.Parse(append(flagArgs, positional...))
+}
+
+// standaloneGate is auth for a non-hub listener: only when asked for.
+func standaloneGate(path string) *auth.Gate {
+	if path == "" {
+		return nil
+	}
+	g := &auth.Gate{Path: path}
+	if err := g.Check(); err != nil {
+		die(err)
+	}
+	return g
+}
+
+func envOr(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
 }
 
 func die(err error) {
